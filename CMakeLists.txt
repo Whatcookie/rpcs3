@@ -1,6 +1,9 @@
-cmake_minimum_required(VERSION 3.8.2)
-
+cmake_minimum_required(VERSION 3.9.6)
 project(rpcs3)
+
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
+
+option(USE_LTO "makes rpcs3 compile with LTO, currently sets -O2 as well due to a bug. Off by default due to inflated compile times." OFF)
 
 option(WITH_GDB "WITH_GDB" OFF)
 option(USE_NATIVE_INSTRUCTIONS "USE_NATIVE_INSTRUCTIONS makes rpcs3 compile with -march=native, which is useful for local builds, but not good for packages." ON)
@@ -22,6 +25,17 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/rpcs3/cmake_modules")
 
 set(CMAKE_CXX_STANDARD 17)
 include(CheckCXXCompilerFlag)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT supported OUTPUT error)
+
+if (USE_LTO AND supported)
+	message(STATUS "IPO / LTO enabled")
+	set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+	set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 ")
+else()
+	message(STATUS "IPO / LTO not supported: <${error}>")
+endif()
+
 
 if (WITH_GDB)
 	add_definitions(-DWITH_GDB_DEBUGGER)
