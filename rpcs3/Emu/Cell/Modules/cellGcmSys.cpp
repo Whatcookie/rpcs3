@@ -857,7 +857,7 @@ u64 cellGcmGetVBlankCount()
 {
 	cellGcmSys.trace("cellGcmGetVBlankCount()");
 
-	return rsx::get_current_renderer()->vblank_count;
+	return rsx::get_current_renderer()->vblank_count.load();
 }
 
 s32 cellGcmGetVBlankCount2()
