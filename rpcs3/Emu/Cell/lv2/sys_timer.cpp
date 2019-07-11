@@ -318,6 +318,13 @@ error_code sys_timer_usleep(ppu_thread& ppu, u64 sleep_time)
 
 			if (remaining > host_min_quantum)
 			{
+				if (sleep_time > 10000)
+				{
+					// Nier hack
+					thread_ctrl::wait_for(remaining / 2);
+					return CELL_OK;
+				}
+
 #ifdef __linux__
 				// Do not wait for the last quantum to avoid loss of accuracy
 				thread_ctrl::wait_for(remaining - ((remaining % host_min_quantum) + host_min_quantum));
