@@ -419,7 +419,11 @@ struct cfg_root : cfg::node
 		cfg::_bool hle_lwmutex{this, "HLE lwmutex"}; // Force alternative lwmutex/lwcond implementation
 
 		cfg::_int<10, 1000> clocks_scale{this, "Clocks scale", 100}; // Changing this from 100 (percentage) may affect game speed in unexpected ways
+#ifdef __linux__
+		cfg::_enum<sleep_timers_accuracy_level> sleep_timers_accuracy{this, "Sleep Timers Accuracy", sleep_timers_accuracy_level::_as_host};
+#else
 		cfg::_enum<sleep_timers_accuracy_level> sleep_timers_accuracy{this, "Sleep Timers Accuracy", sleep_timers_accuracy_level::_usleep};
+#endif
 	} core{this};
 
 	struct node_vfs : cfg::node
