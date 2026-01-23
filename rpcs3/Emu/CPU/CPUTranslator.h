@@ -3651,6 +3651,18 @@ public:
 		return result;
 	}
 
+	template <typename T1, typename T2, typename T3>
+	value_t<u32[4]> vpdpbusds(T1 a, T2 b, T3 c)
+	{
+		value_t<u32[4]> result;
+
+		const auto data0 = a.eval(m_ir);
+		const auto data1 = b.eval(m_ir);
+		const auto data2 = c.eval(m_ir);
+		result.value = m_ir->CreateCall(get_intrinsic(llvm::Intrinsic::x86_avx512_vpdpbusds_128), {data0, data1, data2});
+		return result;
+	}
+
 	template <typename T1, typename T2>
 	value_t<u8[16]> vpermb(T1 a, T2 b)
 	{

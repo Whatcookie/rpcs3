@@ -447,6 +447,15 @@ Function* PPUTranslator::GetSymbolResolver(const ppu_module<lv2_obj>& info)
 
 Value* PPUTranslator::VecHandleNan(Value* val)
 {
+
+	if (m_use_avx512)
+	{
+		auto valcast = value<f32[4]>(val);
+		val = vfixupimmps(valcast, valcast, splat<u32[4]>(0x00000033u), 0, 0xff).value;
+
+		return val;
+	}
+
 	const auto is_nan = m_ir->CreateFCmpUNO(val, val);
 
 	val = m_ir->CreateSelect(is_nan, nan_vec4, val);
@@ -1649,6 +1658,7 @@ void PPUTranslator::VPERM(ppu_opcode_t op)
 
 	if (m_use_avx512_icl)
 	{
+		
 		const auto i = eval(~c);
 		set_vr(op.vd, vperm2b(b, a, i));
 		return;
@@ -2074,6 +2084,7 @@ void PPUTranslator::VSUBUWS(ppu_opcode_t op)
 
 void PPUTranslator::VSUMSWS(ppu_opcode_t op)
 {
+	ppu_log.error("VSUMSWS interesting at [0x%08x]", m_addr + (m_reloc ? m_reloc->addr : 0));
 	const auto [a, b] = get_vrs<s32[4]>(op.va, op.vb);
 	const auto x = sext<s64[2]>(zshuffle(a, 0, 1));
 	const auto y = sext<s64[2]>(zshuffle(a, 2, 3));
@@ -2086,6 +2097,7 @@ void PPUTranslator::VSUMSWS(ppu_opcode_t op)
 
 void PPUTranslator::VSUM2SWS(ppu_opcode_t op)
 {
+	ppu_log.error("VSUM2SWS interesting at [0x%08x]", m_addr + (m_reloc ? m_reloc->addr : 0));
 	const auto [a, b] = get_vrs<s64[2]>(op.va, op.vb);
 	const auto x = a << 32 >> 32;
 	const auto y = a >> 32;
@@ -2097,8 +2109,20 @@ void PPUTranslator::VSUM2SWS(ppu_opcode_t op)
 
 void PPUTranslator::VSUM4SBS(ppu_opcode_t op)
 {
-	const auto a = get_vr<s16[8]>(op.va);
 	const auto b = get_vr<s32[4]>(op.vb);
+
+	if (m_use_vnni)
+	{
+		const auto a = get_vr<s32[4]>(op.va);
+		const auto ones = splat<u32[4]>(0x01010101);
+		const auto ax = bitcast<u16[8]>(vpdpbusds(b, ones, a));
+		const auto bx = bitcast<u16[8]>(vpdpbusd(b, ones, a));
+		set_vr(op.vd, ax);
+		set_sat(ax ^ bx);
+		return;
+	}
+
+	const auto a = get_vr<s16[8]>(op.va);
 	const auto x = eval(bitcast<s32[4]>((a << 8 >> 8) + (a >> 8)));
 	const auto s = eval((x << 16 >> 16) + (x >> 16));
 	const auto r = add_sat(s, b);
@@ -2108,6 +2132,7 @@ void PPUTranslator::VSUM4SBS(ppu_opcode_t op)
 
 void PPUTranslator::VSUM4SHS(ppu_opcode_t op)
 {
+	ppu_log.error("VSUM4SHS interesting at [0x%08x]", m_addr + (m_reloc ? m_reloc->addr : 0));
 	const auto a = get_vr<s32[4]>(op.va);
 	const auto b = get_vr<s32[4]>(op.vb);
 	const auto s = eval((a << 16 >> 16) + (a >> 16));
@@ -2118,8 +2143,21 @@ void PPUTranslator::VSUM4SHS(ppu_opcode_t op)
 
 void PPUTranslator::VSUM4UBS(ppu_opcode_t op)
 {
-	const auto a = get_vr<u16[8]>(op.va);
 	const auto b = get_vr<u32[4]>(op.vb);
+
+	if (m_use_vnni)
+	{
+		ppu_log.error("VSUM4UBS interesting at [0x%08x]", m_addr + (m_reloc ? m_reloc->addr : 0));\
+		const auto a = get_vr<u32[4]>(op.va);
+		const auto ones = splat<u32[4]>(0x01010101);
+		const auto ax = bitcast<u16[8]>(vpdpbusds(b, a, ones));
+		const auto bx = bitcast<u16[8]>(vpdpbusd(b, a, ones));
+		set_vr(op.vd, ax);
+		set_sat(ax ^ bx);
+		return;
+	}
+
+	const auto a = get_vr<u16[8]>(op.va);
 	const auto x = eval(bitcast<u32[4]>((a & 0xff) + (a >> 8)));
 	const auto s = eval((x & 0xffff) + (x >> 16));
 	const auto r = add_sat(s, b);
@@ -2132,6 +2170,7 @@ void PPUTranslator::VSUM4UBS(ppu_opcode_t op)
 void PPUTranslator::VUPKHPX(ppu_opcode_t op)
 {
 	// Caution: potentially out-of-lane algorithm
+	ppu_log.error("Pixel unpack interesting at [0x%08x]", m_addr + (m_reloc ? m_reloc->addr : 0));
 	const auto px = sext<s32[4]>(zshuffle(get_vr<s16[8]>(op.vb), 4, 5, 6, 7));
 	set_vr(op.vd, UNPACK_PIXEL_OP(px));
 }
