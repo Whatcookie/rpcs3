@@ -1737,6 +1737,11 @@ public:
 		return base::load() != 0;
 	}
 
+	const uchar& raw() const
+	{
+		return base::raw();
+	}
+
 	// Override implicit conversion from the parent type
 	explicit operator uchar() const = delete;
 
