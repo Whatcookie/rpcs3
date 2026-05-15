@@ -114,8 +114,8 @@ spu_function_t spu_recompiler::compile(spu_program&& _func)
 	}
 
 	// Initialize args
-	this->cpu = &x86::r13;
-	this->ls = &x86::rbp;
+	this->cpu = &x86::rbp;
+	this->ls = &x86::r14;
 	this->rip = &x86::r12;
 
 	this->pc0 = &x86::r15;
@@ -182,6 +182,7 @@ spu_function_t spu_recompiler::compile(spu_program&& _func)
 
 	// Load actual PC and check status
 	c->sub(x86::rsp, 0x28);
+	c->mov(*ls, x86::rsi);
 	c->mov(pc0->r32(), SPU_OFF_32(pc));
 	c->cmp(SPU_OFF_32(state), 0);
 	c->jnz(label_stop);
@@ -840,6 +841,7 @@ spu_function_t spu_recompiler::compile(spu_program&& _func)
 		c->bind(label_diff);
 		c->inc(SPU_OFF_64(block_failure));
 		c->add(x86::rsp, 0x28);
+		c->mov(x86::rsi, *ls);
 		c->jmp(spu_runtime::tr_dispatch);
 	}
 
@@ -1044,6 +1046,7 @@ void spu_recompiler::branch_fixed(u32 target, bool absolute)
 	if (ppptr)
 	{
 		c->add(x86::rsp, 0x28);
+		c->mov(x86::rsi, *ls);
 		c->jmp(ppptr);
 	}
 	else
@@ -1156,6 +1159,7 @@ void spu_recompiler::branch_indirect(spu_opcode_t op, bool jt, bool ret)
 	if (ppptr)
 	{
 		c->add(x86::rsp, 0x28);
+		c->mov(x86::rsi, *ls);
 		c->jmp(ppptr);
 	}
 	else

@@ -215,6 +215,120 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 	// Function chunk list for processing
 	std::vector<u32> m_function_queue;
 
+	static constexpr bool use_lsptr_arg_in_rsi =
+#if defined(ARCH_X64)
+		true;
+#else
+		false;
+#endif
+
+	static constexpr u32 thread_arg_index = use_lsptr_arg_in_rsi ? 1 : 0;
+	static constexpr u32 base_pc_arg_index = 2;
+	static constexpr u32 lsptr_arg_index = use_lsptr_arg_in_rsi ? 5 : 1;
+	static constexpr u32 real_sp_arg_index = use_lsptr_arg_in_rsi ? 6 : 3;
+	static constexpr u32 real_r3_arg_index = use_lsptr_arg_in_rsi ? 7 : 4;
+
+	llvm::Type* get_ghc_pad_type()
+	{
+		return get_type<u64>();
+	}
+
+	llvm::Value* get_ghc_pad()
+	{
+		return llvm::UndefValue::get(get_ghc_pad_type());
+	}
+
+	llvm::FunctionType* get_spu_entry_type()
+	{
+		return get_ftype<void, u8*, u8*, u64>();
+	}
+
+	llvm::FunctionType* get_spu_main_type()
+	{
+		if constexpr (use_lsptr_arg_in_rsi)
+		{
+			return get_ftype<void, u64, u8*, u64, u64, u64, u8*>();
+		}
+		else
+		{
+			return get_spu_entry_type();
+		}
+	}
+
+	llvm::FunctionType* get_spu_chunk_type()
+	{
+		if constexpr (use_lsptr_arg_in_rsi)
+		{
+#if 0
+			return get_ftype<u8*, u64, u8*, u32, u64, u64, u8*>();
+#else
+			return get_ftype<void, u64, u8*, u32, u64, u64, u8*>();
+#endif
+		}
+		else
+		{
+#if 0
+			return get_ftype<u8*, u8*, u8*, u32>();
+#else
+			return get_ftype<void, u8*, u8*, u32>();
+#endif
+		}
+	}
+
+	llvm::FunctionType* get_spu_trampoline_type()
+	{
+		return get_spu_main_type();
+	}
+
+	llvm::FunctionType* get_spu_func_type()
+	{
+		if constexpr (use_lsptr_arg_in_rsi)
+		{
+			return get_ftype<u32[4], u64, u8*, u32, u64, u64, u8*, u32[4], u32[4]>();
+		}
+		else
+		{
+			return get_ftype<u32[4], u8*, u8*, u32, u32[4], u32[4]>();
+		}
+	}
+
+	std::vector<llvm::Value*> get_spu_ghc_args(llvm::Value* thread, llvm::Value* lsptr, llvm::Value* base_pc)
+	{
+		if constexpr (use_lsptr_arg_in_rsi)
+		{
+			return {get_ghc_pad(), thread, base_pc, get_ghc_pad(), get_ghc_pad(), lsptr};
+		}
+		else
+		{
+			return {thread, lsptr, base_pc};
+		}
+	}
+
+	std::vector<llvm::Value*> get_spu_ghc_args(llvm::Value* base_pc = nullptr)
+	{
+		return get_spu_ghc_args(m_thread, m_lsptr, base_pc ? base_pc : m_base_pc);
+	}
+
+	std::vector<llvm::Value*> get_spu_func_args(llvm::Value* sp, llvm::Value* r3)
+	{
+		auto args = get_spu_ghc_args();
+		args.push_back(sp);
+		args.push_back(r3);
+		return args;
+	}
+
+	std::vector<llvm::Value*> get_spu_entry_args(llvm::Value* thread, llvm::Value* lsptr, llvm::Value* base_pc)
+	{
+		return {thread, lsptr, base_pc};
+	}
+
+	void set_spu_args(llvm::Function* func)
+	{
+		m_thread = func->getArg(thread_arg_index);
+		m_lsptr = func->getArg(lsptr_arg_index);
+		m_base_pc = func->getArg(base_pc_arg_index);
+	}
+
 	// Add or get the function chunk
 	function_info* add_function(u32 addr)
 	{
@@ -226,16 +340,10 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 			return &empl.first->second;
 		}
 
-		// Chunk function type
-		// 0. Result (tail call target)
-		// 1. Thread context
-		// 2. Local storage pointer
-		// 3.
-#if 0
-		const auto chunk_type = get_ftype<u8*, u8*, u8*, u32>();
-#else
-		const auto chunk_type = get_ftype<void, u8*, u8*, u32>();
-#endif
+		// Chunk function type.
+		// On x64, the runtime enters through a wrapper with the shared SPU ABI,
+		// then LLVM chunks use RBP for spu_thread* and RSI for LS.
+		const auto chunk_type = get_spu_chunk_type();
 
 		// Get function chunk name
 		const std::string name = fmt::format("__spu-cx%05x-%s", addr, fmt::base57(be_t<u64>{m_hash_start}));
@@ -243,8 +351,8 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 		// Set parameters
 		result->setLinkage(llvm::GlobalValue::InternalLinkage);
-		result->addParamAttr(0, llvm::Attribute::NoAlias);
-		result->addParamAttr(1, llvm::Attribute::NoAlias);
+		result->addParamAttr(thread_arg_index, llvm::Attribute::NoAlias);
+		result->addParamAttr(lsptr_arg_index, llvm::Attribute::NoAlias);
 #if 1
 		result->setCallingConv(llvm::CallingConv::GHC);
 #endif
@@ -258,17 +366,16 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 			if (ffound != m_funcs.end() && ffound->second.good)
 			{
-				// Real function type (not equal to chunk type)
-				// 4. $SP
-				// 5. $3
-				const auto func_type = get_ftype<u32[4], u8*, u8*, u32, u32[4], u32[4]>();
+				// Real function type (not equal to chunk type).
+				// The final vector arguments are $SP and $3.
+				const auto func_type = get_spu_func_type();
 
 				const std::string fname = fmt::format("__spu-fx%05x-%s", addr, fmt::base57(be_t<u64>{m_hash_start}));
 				llvm::Function* fn = llvm::cast<llvm::Function>(m_module->getOrInsertFunction(fname, func_type).getCallee());
 
 				fn->setLinkage(llvm::GlobalValue::InternalLinkage);
-				fn->addParamAttr(0, llvm::Attribute::NoAlias);
-				fn->addParamAttr(1, llvm::Attribute::NoAlias);
+				fn->addParamAttr(thread_arg_index, llvm::Attribute::NoAlias);
+				fn->addParamAttr(lsptr_arg_index, llvm::Attribute::NoAlias);
 #if 1
 				fn->setCallingConv(llvm::CallingConv::GHC);
 #endif
@@ -314,7 +421,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		}
 
 		ensure(callee);
-		auto call = m_ir->CreateCall(callee, {m_thread, m_lsptr, base_pc ? base_pc : m_base_pc});
+		auto call = m_ir->CreateCall(callee, get_spu_ghc_args(base_pc));
 		auto func = m_finfo ? m_finfo->chunk : llvm::dyn_cast<llvm::Function>(callee.getCallee());
 		call->setCallingConv(func->getCallingConv());
 		call->setTailCall();
@@ -349,7 +456,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 			r3 = get_reg_fixed<u32[4]>(3).value;
 		}
 
-		const auto _call = m_ir->CreateCall(ensure(fn), {m_thread, m_lsptr, m_base_pc, sp, r3});
+		const auto _call = m_ir->CreateCall(ensure(fn), get_spu_func_args(sp, r3));
 
 		_call->setCallingConv(fn->getCallingConv());
 
@@ -388,18 +495,21 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 		m_ir->CreateRet(get_reg_fixed<u32[4]>(3).value);
 	}
 
-	void set_function(llvm::Function* func)
+	void reset_function_state()
 	{
-		m_function = func;
-		m_thread = func->getArg(0);
-		m_lsptr = func->getArg(1);
-		m_base_pc = func->getArg(2);
-
 		m_reg_addr.fill(nullptr);
 		m_block = nullptr;
 		m_finfo = nullptr;
 		m_blocks.clear();
 		m_block_queue.clear();
+	}
+
+	void set_function(llvm::Function* func)
+	{
+		m_function = func;
+		set_spu_args(func);
+
+		reset_function_state();
 		m_ir->SetInsertPoint(llvm::BasicBlock::Create(m_context, "", m_function));
 		m_memptr = m_ir->CreateLoad(get_type<u8*>(), spu_ptr(&spu_thread::memory_base_addr));
 	}
@@ -420,9 +530,7 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 
 				m_finfo->fn = fn;
 				m_function = fn;
-				m_thread = fn->getArg(0);
-				m_lsptr = fn->getArg(1);
-				m_base_pc = fn->getArg(2);
+				set_spu_args(fn);
 				m_ir->SetInsertPoint(llvm::BasicBlock::Create(m_context, "", fn));
 				m_memptr = m_ir->CreateLoad(get_type<u8*>(), spu_ptr(&spu_thread::memory_base_addr));
 
@@ -439,10 +547,10 @@ class spu_llvm_recompiler : public spu_recompiler_base, public cpu_translator
 				}
 
 				// Load $SP
-				m_finfo->load[s_reg_sp] = fn->getArg(3);
+				m_finfo->load[s_reg_sp] = fn->getArg(real_sp_arg_index);
 
 				// Load first args
-				m_finfo->load[3] = fn->getArg(4);
+				m_finfo->load[3] = fn->getArg(real_r3_arg_index);
 			}
 		}
 		else if (m_block_info[target / 4] && m_entry_info[target / 4] && !(pred_found && m_entry == target) && (!m_finfo->fn || !m_ret_info[target / 4]))
@@ -1728,11 +1836,14 @@ public:
 		IRBuilder<> irb(m_context);
 		m_ir = &irb;
 
-		// Add entry function (contains only state/code check)
-		const auto main_func = llvm::cast<llvm::Function>(m_module->getOrInsertFunction(m_hash, get_ftype<void, u8*, u8*, u64>()).getCallee());
-		const auto main_arg2 = main_func->getArg(2);
+		// Shared SPU runtime ABI on x64 uses RBP for spu_thread* and RSI for LS.
+		const auto main_func = llvm::cast<llvm::Function>(m_module->getOrInsertFunction(m_hash, get_spu_main_type()).getCallee());
+		main_func->addParamAttr(thread_arg_index, llvm::Attribute::NoAlias);
+		main_func->addParamAttr(lsptr_arg_index, llvm::Attribute::NoAlias);
 		main_func->setCallingConv(CallingConv::GHC);
+
 		set_function(main_func);
+		const auto main_arg2 = main_func->getArg(base_pc_arg_index);
 
 		init_luts();
 
@@ -2023,7 +2134,7 @@ public:
 
 		// Call the entry function chunk
 		const auto entry_chunk = add_function(m_pos);
-		const auto entry_call = m_ir->CreateCall(entry_chunk->chunk, {m_thread, m_lsptr, m_base_pc});
+		const auto entry_call = m_ir->CreateCall(entry_chunk->chunk, get_spu_ghc_args());
 		entry_call->setCallingConv(entry_chunk->chunk->getCallingConv());
 
 		const auto dispatcher = llvm::cast<llvm::Function>(m_module->getOrInsertFunction("spu_dispatcher", main_func->getType()).getCallee());
@@ -2033,7 +2144,7 @@ public:
 		// Proceed to the next code
 		if (entry_chunk->chunk->getReturnType() != get_type<void>())
 		{
-			const auto next_call = m_ir->CreateCall(main_func->getFunctionType(), entry_call, {m_thread, m_lsptr, m_ir->getInt64(0)});
+			const auto next_call = m_ir->CreateCall(main_func->getFunctionType(), entry_call, get_spu_ghc_args(m_ir->getInt64(0)));
 			next_call->setCallingConv(main_func->getCallingConv());
 			next_call->setTailCall();
 		}
@@ -2054,7 +2165,10 @@ public:
 		{
 			const auto pbfail = spu_ptr(&spu_thread::block_failure);
 			m_ir->CreateStore(m_ir->CreateAdd(m_ir->CreateLoad(get_type<u64>(), pbfail), m_ir->getInt64(1)), pbfail);
-			const auto dispci = call("spu_dispatch", spu_runtime::tr_dispatch, m_thread, m_lsptr, main_arg2);
+			const auto dispfunc = llvm::cast<llvm::Function>(m_module->getOrInsertFunction("spu_dispatch", get_spu_trampoline_type()).getCallee());
+			m_engine->updateGlobalMapping("spu_dispatch", reinterpret_cast<u64>(spu_runtime::tr_dispatch));
+			dispfunc->setCallingConv(CallingConv::GHC);
+			const auto dispci = m_ir->CreateCall(dispfunc, get_spu_ghc_args(main_arg2));
 			dispci->setCallingConv(CallingConv::GHC);
 			dispci->setTailCall();
 			m_ir->CreateRetVoid();
@@ -2071,7 +2185,7 @@ public:
 
 		if (entry_chunk->chunk->getReturnType() == get_type<void>())
 		{
-			const auto next_call = m_ir->CreateCall(main_func->getFunctionType(), dispatcher, {m_thread, m_lsptr, m_ir->getInt64(0)});
+			const auto next_call = m_ir->CreateCall(main_func->getFunctionType(), dispatcher, get_spu_ghc_args(m_ir->getInt64(0)));
 			next_call->setCallingConv(main_func->getCallingConv());
 			next_call->setTailCall();
 			m_ir->CreateRetVoid();
@@ -3612,7 +3726,13 @@ public:
 #ifdef _WIN32
 		main_func->setCallingConv(CallingConv::Win64);
 #endif
-		set_function(main_func);
+		m_function = main_func;
+		m_thread = main_func->getArg(0);
+		m_lsptr = main_func->getArg(1);
+		m_base_pc = main_func->getArg(2);
+		reset_function_state();
+		m_ir->SetInsertPoint(BasicBlock::Create(m_context, "", main_func));
+		m_memptr = m_ir->CreateLoad(get_type<u8*>(), spu_ptr(&spu_thread::memory_base_addr));
 
 		// Load pc and opcode
 		m_interp_pc = m_ir->CreateLoad(get_type<u32>(), spu_ptr(&spu_thread::pc));
@@ -3713,6 +3833,7 @@ public:
 				m_interp_table = f->getArg(4);
 				m_interp_7f0 = f->getArg(5);
 				m_interp_regs = f->getArg(6);
+				reset_function_state();
 
 				m_ir->SetInsertPoint(BasicBlock::Create(m_context, "", f));
 				m_memptr = m_ir->CreateLoad(get_type<u8*>(), spu_ptr(&spu_thread::memory_base_addr));

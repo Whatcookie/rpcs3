@@ -87,20 +87,20 @@ void fmt_class_string<spu_recompiler_base::compare_direction>::format(std::strin
 static u8* move_args_ghc_to_native(u8* raw)
 {
 #ifdef _WIN32
-	// mov  rcx, r13
-	// mov  rdx, rbp
+	// mov  rcx, rbp
+	// mov  rdx, rsi
 	// mov  r8,  r12
 	// mov  r9,  rbx
-	std::memcpy(raw, "\x4C\x89\xE9\x48\x89\xEA\x4D\x89\xE0\x49\x89\xD9", 12);
+	std::memcpy(raw, "\x48\x89\xE9\x48\x89\xF2\x4D\x89\xE0\x49\x89\xD9", 12);
+	return raw + 12;
 #else
-	// mov  rdi, r13
-	// mov  rsi, rbp
+	// mov  rdi, rbp
+	// rsi already contains LS
 	// mov  rdx, r12
 	// mov  rcx, rbx
-	std::memcpy(raw, "\x4C\x89\xEF\x48\x89\xEE\x4C\x89\xE2\x48\x89\xD9", 12);
+	std::memcpy(raw, "\x48\x89\xEF\x4C\x89\xE2\x48\x89\xD9", 9);
+	return raw + 9;
 #endif
-
-	return raw + 12;
 }
 #elif defined(ARCH_ARM64)
 static void ghc_cpp_trampoline(u64 fn_target, native_asm& c, auto& args)
@@ -209,21 +209,19 @@ DECLARE(spu_runtime::g_dispatcher) = []
 DECLARE(spu_runtime::tr_all) = []
 {
 #if defined(ARCH_X64)
-	u8* const trptr = jit_runtime::alloc(32, 16);
+	u8* const trptr = jit_runtime::alloc(48, 16);
 	u8* raw = trptr;
 
-	// Load PC: mov eax, [r13 + spu_thread::pc]
-	*raw++ = 0x41;
+	// Load PC: mov eax, [rbp + spu_thread::pc]
 	*raw++ = 0x8b;
 	*raw++ = 0x45;
 	*raw++ = ::narrow<s8>(::offset32(&spu_thread::pc));
 
-	// Get LS address starting from PC: lea rcx, [rbp + rax]
+	// Get LS address starting from PC: lea rcx, [rsi + rax]
 	*raw++ = 0x48;
 	*raw++ = 0x8d;
-	*raw++ = 0x4c;
-	*raw++ = 0x05;
-	*raw++ = 0x00;
+	*raw++ = 0x0c;
+	*raw++ = 0x06;
 
 	// mov eax, [rcx]
 	*raw++ = 0x8b;
@@ -242,8 +240,8 @@ DECLARE(spu_runtime::tr_all) = []
 	std::memcpy(raw, &r32, 4);
 	raw += 4;
 
-	// Update block_hash (set zero): mov [r13 + spu_thread::m_block_hash], 0
-	*raw++ = 0x49;
+	// Update block_hash (set zero): mov [rbp + spu_thread::m_block_hash], 0
+	*raw++ = 0x48;
 	*raw++ = 0xc7;
 	*raw++ = 0x45;
 	*raw++ = ::narrow<s8>(::offset32(&spu_thread::block_hash));
@@ -343,8 +341,8 @@ DECLARE(spu_runtime::g_gateway) = build_function_asm<spu_function_t>("spu_gatewa
 	c.mov(x86::qword_ptr(args[0], ::offset32(&spu_thread::hv_ctx, &rpcs3::hypervisor_context_t::regs)), x86::rsp);
 
 	// Move 4 args (despite spu_function_t def)
-	c.mov(x86::r13, args[0]);
-	c.mov(x86::rbp, args[1]);
+	c.mov(x86::rbp, args[0]);
+	c.mov(x86::rsi, args[1]);
 	c.mov(x86::r12, args[2]);
 	c.mov(x86::rbx, args[3]);
 
@@ -490,8 +488,8 @@ DECLARE(spu_runtime::g_tail_escape) = build_function_asm<void(*)(spu_thread*, sp
 	c.sub(x86::rsp, 16);
 
 	// Tail call, GHC CC (second arg)
-	c.mov(x86::r13, args[0]);
-	c.mov(x86::rbp, x86::qword_ptr(args[0], ::offset32(&spu_thread::ls)));
+	c.mov(x86::rbp, args[0]);
+	c.mov(x86::rsi, x86::qword_ptr(args[0], ::offset32(&spu_thread::ls)));
 	c.mov(x86::r12, args[2]);
 	c.xor_(x86::ebx, x86::ebx);
 	c.mov(x86::qword_ptr(x86::rsp), args[1]);
@@ -9283,24 +9281,22 @@ struct spu_fast : public spu_recompiler_base
 		std::memcpy(raw, &m_hash_start, sizeof(m_hash_start));
 		raw += 8;
 
-		// Update block_hash: mov [r13 + spu_thread::m_block_hash], rax
-		*raw++ = 0x49;
+		// Update block_hash: mov [rbp + spu_thread::m_block_hash], rax
+		*raw++ = 0x48;
 		*raw++ = 0x89;
 		*raw++ = 0x45;
 		*raw++ = ::narrow<s8>(::offset32(&spu_thread::block_hash));
 
-		// Load PC: mov eax, [r13 + spu_thread::pc]
-		*raw++ = 0x41;
+		// Load PC: mov eax, [rbp + spu_thread::pc]
 		*raw++ = 0x8b;
 		*raw++ = 0x45;
 		*raw++ = ::narrow<s8>(::offset32(&spu_thread::pc));
 
-		// Get LS address starting from PC: lea rcx, [rbp + rax]
+		// Get LS address starting from PC: lea rcx, [rsi + rax]
 		*raw++ = 0x48;
 		*raw++ = 0x8d;
-		*raw++ = 0x4c;
-		*raw++ = 0x05;
-		*raw++ = 0x00;
+		*raw++ = 0x0c;
+		*raw++ = 0x06;
 
 		// Verification (slow)
 		for (u32 i = 0; i < func.data.size(); i++)
@@ -9336,10 +9332,11 @@ struct spu_fast : public spu_recompiler_base
 		*raw++ = 0xec;
 		*raw++ = 0x28;
 
-		// Fix args: xchg r13,rbp
+		// Interpreter table uses LS as its first GHC argument.
+		// mov r13, rsi
 		*raw++ = 0x49;
-		*raw++ = 0x87;
-		*raw++ = 0xed;
+		*raw++ = 0x89;
+		*raw++ = 0xf5;
 
 		// mov r12d, eax
 		*raw++ = 0x41;
