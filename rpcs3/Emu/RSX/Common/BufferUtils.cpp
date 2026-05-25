@@ -9,6 +9,9 @@
 #if defined(ARCH_X64)
 #include "BufferUtils_avx512.h"
 #endif
+#if defined(ARCH_ARM64)
+#include "BufferUtils_neon.h"
+#endif
 
 #if !defined(_MSC_VER)
 #pragma GCC diagnostic push
@@ -405,6 +408,11 @@ namespace
 				r = upload_xi16(src.data(), dst.data(), count, restart_index);
 			else
 				r = upload_xi32(src.data(), dst.data(), count, restart_index);
+#elif defined(ARCH_ARM64)
+			if constexpr (sizeof(T) == 2)
+				r = upload_u16_swapped_neon_restart(src.data(), dst.data(), count, restart_index);
+			else
+				r = upload_u32_swapped_neon_restart(src.data(), dst.data(), count, restart_index);
 #else
 			r = upload_untouched_naive(src.data(), dst.data(), count, restart_index);
 #endif
