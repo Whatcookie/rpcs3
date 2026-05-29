@@ -759,6 +759,8 @@ jit_compiler::jit_compiler(const std::unordered_map<std::string, u64>& _link, co
 		attributes.push_back("+sve2");
 	else
 		attributes.push_back("-sve2");
+
+	attributes.push_back("+lut");
 #endif
 
 	{

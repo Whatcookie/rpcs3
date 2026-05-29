@@ -5664,6 +5664,18 @@ public:
 	void FSMH(spu_opcode_t op)
 	{
 		const auto v = extract(get_vr(op.ra), 3);
+
+#ifdef ARCH_ARM64
+		if (m_use_lut)
+		{
+			const auto indices = bitcast<u8[16]>(insert(splat<u32[4]>(0), 0, v));
+			const auto low = luti2(build<u16[8]>(0x0000, 0xffff, 0x0000, 0xffff, 0x0000, 0x0000, 0x0000, 0x0000), indices, 0);
+			const auto high = luti2(build<u16[8]>(0x0000, 0x0000, 0xffff, 0xffff, 0x0000, 0x0000, 0x0000, 0x0000), indices, 0);
+			set_vr(op.rt, bitcast<s16[8]>(shuffle2(low, high, 0, 8, 1, 9, 2, 10, 3, 11)));
+			return;
+		}
+#endif
+
 		const auto m = bitcast<bool[8]>(trunc<u8>(v));
 		set_vr(op.rt, sext<s16[8]>(m));
 	}
@@ -5671,6 +5683,17 @@ public:
 	void FSMB(spu_opcode_t op)
 	{
 		const auto v = extract(get_vr(op.ra), 3);
+
+#ifdef ARCH_ARM64
+		if (m_use_lut)
+		{
+			const auto indices = bitcast<u8[16]>(insert(splat<u32[4]>(0), 0, v));
+			const auto masks = luti2(build<u16[8]>(0x0000, 0x00ff, 0xff00, 0xffff, 0x0000, 0x0000, 0x0000, 0x0000), indices, 0);
+			set_vr(op.rt, bitcast<s8[16]>(masks));
+			return;
+		}
+#endif
+
 		const auto m = bitcast<bool[16]>(trunc<u16>(v));
 		set_vr(op.rt, sext<s8[16]>(m));
 	}

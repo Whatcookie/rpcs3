@@ -3123,6 +3123,9 @@ protected:
 
 	// Allow direct TBL2/TBX2 emission.
 	bool m_use_tbl2 = true;
+
+	// Allow direct LUTI emission.
+	bool m_use_lut = true;
 #else
 	// Allow FMA
 	bool m_use_fma = false;
@@ -3745,6 +3748,19 @@ template <typename T1, typename T2, typename T3>
 		const auto data1 = b.eval(m_ir);
 
 		result.value = m_ir->CreateCall(get_intrinsic<u32[4]>(llvm::Intrinsic::aarch64_neon_umull), {data0, data1});
+		return result;
+	}
+
+	template <typename T1, typename T2>
+	value_t<u16[8]> luti2(T1 table, T2 indices, u8 idx)
+	{
+		value_t<u16[8]> result;
+
+		const auto data0 = table.eval(m_ir);
+		const auto data1 = indices.eval(m_ir);
+		const auto immediate = llvm_const_int<u8>{idx}.eval(m_ir);
+
+		result.value = m_ir->CreateCall(get_intrinsic<u16[8]>(llvm::Intrinsic::aarch64_neon_vluti2_laneq), {data0, data1, immediate});
 		return result;
 	}
 	
