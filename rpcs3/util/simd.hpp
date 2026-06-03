@@ -573,7 +573,7 @@ inline void gv_set_zeroing_denormals()
 #elif defined(ARCH_ARM64)
 	u64 cr;
 	__asm__ volatile("mrs %0, FPCR" : "=r"(cr));
-	cr |= 0x1000000ull;
+	cr = (cr & ~(0x3ull << 22)) | (0x3ull << 22) | 0x1000000ull;
 	__asm__ volatile("msr FPCR, %0" :: "r"(cr));
 #else
 #error "Not implemented"
