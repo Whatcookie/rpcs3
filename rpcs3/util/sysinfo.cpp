@@ -428,38 +428,12 @@ bool utils::has_dotprod()
 
 bool utils::has_sve()
 {
-	static const bool g_value = []() -> bool
-	{
-#if defined(__linux__)
-		return (getauxval(AT_HWCAP) & HWCAP_SVE) != 0;
-#elif defined(__APPLE__)
-		int val = 0;
-		size_t len = sizeof(val);
-		sysctlbyname("hw.optional.arm.FEAT_SVE", &val, &len, nullptr, 0);
-		return val != 0;
-#elif defined(_WIN32)
-		return IsProcessorFeaturePresent(PF_ARM_SVE_INSTRUCTIONS_AVAILABLE) != 0;
-#endif
-	}();
-	return g_value;
+	return true;
 }
 
 bool utils::has_sve2()
 {
-	static const bool g_value = []() -> bool
-	{
-#if defined(__linux__)
-		return (getauxval(AT_HWCAP2) & HWCAP2_SVE2) != 0;
-#elif defined(__APPLE__)
-		int val = 0;
-		size_t len = sizeof(val);
-		sysctlbyname("hw.optional.arm.FEAT_SVE2", &val, &len, nullptr, 0);
-		return val != 0;
-#elif defined(_WIN32)
-		return IsProcessorFeaturePresent(PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE) != 0;
-#endif
-	}();
-	return g_value;
+	return true;
 }
 
 #if defined(_MSC_VER)
@@ -471,8 +445,7 @@ bool utils::has_sve2()
 // svcntb returns sve length in bytes, our function retuns length in bits
 sve_func int utils::sve_length()
 {
-	static const int g_value = static_cast<int>(svcntb() * 8);
-	return g_value;
+	return 128;
 }
 
 #endif
