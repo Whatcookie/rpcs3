@@ -7883,8 +7883,48 @@ public:
 			const auto a = value<f32[4]>(ci->getOperand(0));
 			const auto b = value<f32[4]>(ci->getOperand(1));
 			const auto c = value<f32[4]>(ci->getOperand(2));
+			const auto ca = eval(clamp_smax(a));
+			const auto cb = eval(clamp_smax(b));
 
-			return fma32x4(eval(-clamp_smax(a)), clamp_smax(b), c);
+#ifdef ARCH_ARM64
+			if (m_use_sve2_128)
+			{
+				if (auto [ok, data] = get_const_vector(c.value, m_pos); ok && is_spu_float_zero(data, 0))
+				{
+					return eval(-ca * cb);
+				}
+
+				if ([&]()
+				{
+					if (auto [ok, data] = get_const_vector(ca.value, m_pos); ok && is_spu_float_zero(data, 0))
+					{
+						return true;
+					}
+
+					if (auto [ok, data] = get_const_vector(cb.value, m_pos); ok && is_spu_float_zero(data, 0))
+					{
+						return true;
+					}
+
+					return false;
+				}())
+				{
+					return c;
+				}
+
+				const auto fixed_type = llvm::cast<llvm::FixedVectorType>(get_type<f32[4]>());
+				const auto va = to_sve_vector(ca.value);
+				const auto vb = to_sve_vector(cb.value);
+				const auto vc = to_sve_vector(c.value);
+				const auto pred_type = llvm::ScalableVectorType::get(m_ir->getInt1Ty(), fixed_type->getNumElements());
+				const auto pg = m_ir->CreateIntrinsic(llvm::Intrinsic::aarch64_sve_ptrue, {pred_type}, {m_ir->getInt32(31)});
+				const auto result = m_ir->CreateIntrinsic(llvm::Intrinsic::aarch64_sve_fmls, {va->getType()}, {pg, vc, va, vb});
+
+				return value<f32[4]>(from_sve_vector(result, fixed_type));
+			}
+#endif
+
+			return fma32x4(eval(-ca), cb, c);
 		});
 
 		set_vr(op.rt4, fnms(get_vr<f32[4]>(op.ra), get_vr<f32[4]>(op.rb), get_vr<f32[4]>(op.rc)));
@@ -8220,10 +8260,42 @@ public:
 
 			if (g_cfg.core.spu_xfloat_accuracy == xfloat_accuracy::approximate)
 			{
+#ifdef ARCH_ARM64
+				if (m_use_sve2_128)
+				{
+					const auto ca = eval(clamp_smax(a));
+					const auto cb = eval(clamp_smax(b));
+					const auto fixed_type = llvm::cast<llvm::FixedVectorType>(get_type<f32[4]>());
+					const auto va = to_sve_vector(ca.value);
+					const auto vb = to_sve_vector(cb.value);
+					const auto vc = to_sve_vector(c.value);
+					const auto pred_type = llvm::ScalableVectorType::get(m_ir->getInt1Ty(), fixed_type->getNumElements());
+					const auto pg = m_ir->CreateIntrinsic(llvm::Intrinsic::aarch64_sve_ptrue, {pred_type}, {m_ir->getInt32(31)});
+					const auto result = m_ir->CreateIntrinsic(llvm::Intrinsic::aarch64_sve_fnmls, {va->getType()}, {pg, vc, va, vb});
+
+					return value<f32[4]>(from_sve_vector(result, fixed_type));
+				}
+#endif
+
 				return fma32x4(clamp_smax(a), clamp_smax(b), eval(-c));
 			}
 			else
 			{
+#ifdef ARCH_ARM64
+				if (m_use_sve2_128)
+				{
+					const auto fixed_type = llvm::cast<llvm::FixedVectorType>(get_type<f32[4]>());
+					const auto va = to_sve_vector(a.value);
+					const auto vb = to_sve_vector(b.value);
+					const auto vc = to_sve_vector(c.value);
+					const auto pred_type = llvm::ScalableVectorType::get(m_ir->getInt1Ty(), fixed_type->getNumElements());
+					const auto pg = m_ir->CreateIntrinsic(llvm::Intrinsic::aarch64_sve_ptrue, {pred_type}, {m_ir->getInt32(31)});
+					const auto result = m_ir->CreateIntrinsic(llvm::Intrinsic::aarch64_sve_fnmls, {va->getType()}, {pg, vc, va, vb});
+
+					return value<f32[4]>(from_sve_vector(result, fixed_type));
+				}
+#endif
+
 				return fma32x4(a, b, eval(-c));
 			}
 		});
