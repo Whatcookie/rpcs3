@@ -310,8 +310,6 @@ struct spu_itype
 	}
 };
 
-using spu_itype_t = spu_itype::type;
-
 struct spu_iflag
 {
 	enum
@@ -536,8 +534,6 @@ struct spu_iflag
 		return value;
 	}
 };
-
-using spu_iflag_t = spu_iflag::flag;
 
 #define NAME(x) static constexpr const char& x = *#x
 
