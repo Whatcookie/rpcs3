@@ -763,7 +763,6 @@ protected:
 
 		// Set if register is used as shuffle mask
 		bit_set<s_reg_max> reg_maybe_shuffle_mask{};
-
 		// Number of times registers are used (before modified)
 		std::array<u32, s_reg_max> reg_use{};
 
