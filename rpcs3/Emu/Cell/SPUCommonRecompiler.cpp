@@ -5440,7 +5440,9 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			}
 		}
 
-		if (valid && !invalid && !reduced_loop_all.count(bpc) && expected_sup_conds  == 0)
+		constexpr bool enable_reduced_loop_optimizations = false;
+
+		if (enable_reduced_loop_optimizations && valid && !invalid && !reduced_loop_all.count(bpc) && expected_sup_conds  == 0)
 		{
 			const auto reduced_loop = &block_state_it.reduced_loop;
 			reduced_loop->discard();
