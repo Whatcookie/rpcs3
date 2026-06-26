@@ -7501,16 +7501,6 @@ public:
 				}
 			}
 
-			if (m_reduced_loop_info && m_reduced_loop_info->is_gpr_not_NaN_hint(op.ra))
-			{
-				safe_finite_compare.set_unsafe(0);
-			}
-
-			if (m_reduced_loop_info && m_reduced_loop_info->is_gpr_not_NaN_hint(op.rb))
-			{
-				safe_finite_compare.set_unsafe(1);
-			}
-
 			if (safe_int_compare.any())
 			{
 				return eval(sext<s32[4]>(bitcast<s32[4]>(a) > bitcast<s32[4]>(b)));
@@ -7715,8 +7705,8 @@ public:
 			}
 		});
 
-		const u32 a_notnan = m_reduced_loop_info && m_reduced_loop_info->is_gpr_not_NaN_hint(op.ra) ? 1 : 0;
-		const u32 b_notnan = m_reduced_loop_info && m_reduced_loop_info->is_gpr_not_NaN_hint(op.rb) ? 1 : 0;
+		const u32 a_notnan = 0;
+		const u32 b_notnan = 0;
 
 		if (op.ra == op.rb && !m_interp_magn)
 		{
@@ -8152,8 +8142,8 @@ public:
 		const auto [a, b, c] = get_vrs<f32[4]>(op.ra, op.rb, op.rc);
 		static const auto MT = match<f32[4]>();
 
-		const u32 a_notnan = m_reduced_loop_info && m_reduced_loop_info->is_gpr_not_NaN_hint(op.ra) ? 1 : 0;
-		const u32 b_notnan = m_reduced_loop_info && m_reduced_loop_info->is_gpr_not_NaN_hint(op.rb) ? 1 : 0;
+		const u32 a_notnan = 0;
+		const u32 b_notnan = 0;
 
 		auto check_sqrt_pattern_for_float = [&](f32 float_value) -> bool
 		{
