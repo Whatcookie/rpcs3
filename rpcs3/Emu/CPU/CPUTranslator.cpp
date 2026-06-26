@@ -247,9 +247,10 @@ llvm::Value* cpu_translator::bitcast(llvm::Value* val, llvm::Type* type, std::so
 
 	llvm::CastInst* i;
 	llvm::Value* source_val = val;
+	constexpr bool enable_bitcast_reuse = false;
 
 	// Try to reuse older bitcasts
-	while ((i = llvm::dyn_cast_or_null<llvm::CastInst>(source_val)) && i->getOpcode() == llvm::Instruction::BitCast)
+	while (enable_bitcast_reuse && (i = llvm::dyn_cast_or_null<llvm::CastInst>(source_val)) && i->getOpcode() == llvm::Instruction::BitCast)
 	{
 		source_val = i->getOperand(0);
 
@@ -261,7 +262,9 @@ llvm::Value* cpu_translator::bitcast(llvm::Value* val, llvm::Type* type, std::so
 
 	// Skip use iteration for values that don't have use lists
 #if LLVM_VERSION_MAJOR >= 21
-	if (source_val->hasUseList())
+	if (enable_bitcast_reuse && source_val->hasUseList())
+#else
+	if (enable_bitcast_reuse)
 #endif
 	{
 		for (llvm::Value* it_val : source_val->uses())
