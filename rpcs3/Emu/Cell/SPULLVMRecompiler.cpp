@@ -2800,7 +2800,7 @@ public:
 					// Execute recompiler function (TODO)
 					(this->*decode(op))({op});
 
-					if (reg_rt < 128 && itype & spu_itype::pure && reg_rt != reg_access[0] && reg_rt != reg_access[1] && reg_rt != reg_access[2])
+					if (false && reg_rt < 128 && itype & spu_itype::pure && reg_rt != reg_access[0] && reg_rt != reg_access[1] && reg_rt != reg_access[2])
 					{
 						masked_times[masked_op] = {ensure(m_block->reg[reg_rt]), inst_times};
 					}
