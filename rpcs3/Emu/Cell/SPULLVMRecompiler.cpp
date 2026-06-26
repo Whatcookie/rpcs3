@@ -8824,23 +8824,28 @@ public:
 		const auto a = get_vr(op.ra);
 		const auto b = get_vr(op.rb);
 
-		for (auto pair : std::initializer_list<std::pair<value_t<u32[4]>, value_t<u32[4]>>>{{a, b}, {b, a}})
-		{
-			if (auto [ok, data] = get_const_vector(pair.first.value, m_pos); ok)
-			{
-				data._u32[3] %= SPU_LS_SIZE;
+		constexpr bool enable_lqx_stqx_address_reuse = false;
 
-				if (const u32 remainder = data._u32[3] % 0x10; remainder == 0)
+		if constexpr (enable_lqx_stqx_address_reuse)
+		{
+			for (auto pair : std::initializer_list<std::pair<value_t<u32[4]>, value_t<u32[4]>>>{{a, b}, {b, a}})
+			{
+				if (auto [ok, data] = get_const_vector(pair.first.value, m_pos); ok)
 				{
-					value_t<u64> addr = eval(splat<u64>(data._u32[3]) + zext<u64>(extract(pair.second, 3) & 0x3fff0));
-					make_store_ls(addr, get_vr<u8[16]>(op.rt));
-					return;
-				}
-				else
-				{
-					value_t<u64> addr = eval(splat<u64>(data._u32[3] - remainder) + zext<u64>((extract(pair.second, 3) + remainder) & 0x3fff0));
-					make_store_ls(addr, get_vr<u8[16]>(op.rt));
-					return;
+					data._u32[3] %= SPU_LS_SIZE;
+
+					if (const u32 remainder = data._u32[3] % 0x10; remainder == 0)
+					{
+						value_t<u64> addr = eval(splat<u64>(data._u32[3]) + zext<u64>(extract(pair.second, 3) & 0x3fff0));
+						make_store_ls(addr, get_vr<u8[16]>(op.rt));
+						return;
+					}
+					else
+					{
+						value_t<u64> addr = eval(splat<u64>(data._u32[3] - remainder) + zext<u64>((extract(pair.second, 3) + remainder) & 0x3fff0));
+						make_store_ls(addr, get_vr<u8[16]>(op.rt));
+						return;
+					}
 				}
 			}
 		}
@@ -8854,23 +8859,28 @@ public:
 		const auto a = get_vr(op.ra);
 		const auto b = get_vr(op.rb);
 
-		for (auto pair : std::initializer_list<std::pair<value_t<u32[4]>, value_t<u32[4]>>>{{a, b}, {b, a}})
-		{
-			if (auto [ok, data] = get_const_vector(pair.first.value, m_pos); ok)
-			{
-				data._u32[3] %= SPU_LS_SIZE;
+		constexpr bool enable_lqx_stqx_address_reuse = false;
 
-				if (const u32 remainder = data._u32[3] % 0x10; remainder == 0)
+		if constexpr (enable_lqx_stqx_address_reuse)
+		{
+			for (auto pair : std::initializer_list<std::pair<value_t<u32[4]>, value_t<u32[4]>>>{{a, b}, {b, a}})
+			{
+				if (auto [ok, data] = get_const_vector(pair.first.value, m_pos); ok)
 				{
-					value_t<u64> addr = eval(splat<u64>(data._u32[3]) + zext<u64>(extract(pair.second, 3) & 0x3fff0));
-					set_vr(op.rt, make_load_ls(addr));
-					return;
-				}
-				else
-				{
-					value_t<u64> addr = eval(splat<u64>(data._u32[3] - remainder) + zext<u64>((extract(pair.second, 3) + remainder) & 0x3fff0));
-					set_vr(op.rt, make_load_ls(addr));
-					return;
+					data._u32[3] %= SPU_LS_SIZE;
+
+					if (const u32 remainder = data._u32[3] % 0x10; remainder == 0)
+					{
+						value_t<u64> addr = eval(splat<u64>(data._u32[3]) + zext<u64>(extract(pair.second, 3) & 0x3fff0));
+						set_vr(op.rt, make_load_ls(addr));
+						return;
+					}
+					else
+					{
+						value_t<u64> addr = eval(splat<u64>(data._u32[3] - remainder) + zext<u64>((extract(pair.second, 3) + remainder) & 0x3fff0));
+						set_vr(op.rt, make_load_ls(addr));
+						return;
+					}
 				}
 			}
 		}
