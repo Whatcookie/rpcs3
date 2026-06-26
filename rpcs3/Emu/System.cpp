@@ -49,7 +49,6 @@
 
 #include <memory>
 #include <regex>
-#include <shared_mutex>
 
 #include "Utilities/JIT.h"
 
@@ -3188,7 +3187,7 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 		std::vector<stx::shared_ptr<named_thread<ppu_thread>>> ppu_thread_list;
 
 		// If EXITGAME signal is not read, force kill after a second.
-		constexpr int loop_timeout_ms = 16;
+		constexpr int loop_timeout_ms = 50;
 		int kill_timeout_ms = 1000;
 		int elapsed_ms = 0;
 
@@ -3205,10 +3204,8 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 				Resume();
 			}, nullptr, true, read_counter);
 
-			std::shared_lock rlock(id_manager::g_mutex, std::defer_lock); 
-
 			// Check if the EXITGAME signal was read. We allow the game to terminate itself if that's the case.
-			if (!read_sysutil_signal && read_counter != get_sysutil_cb_manager_read_count() && rlock.try_lock())
+			if (!read_sysutil_signal && read_counter != get_sysutil_cb_manager_read_count())
 			{
 				sys_log.notice("The game received the exit request. Waiting for it to terminate itself...");
 				kill_timeout_ms += 5000; // Grant a couple more seconds
@@ -3218,12 +3215,7 @@ void Emulator::GracefulShutdown(bool allow_autoexit, bool async_op, bool savesta
 				idm::select<named_thread<ppu_thread>>([&](u32 id, cpu_thread&)
 				{
 					ppu_thread_list.emplace_back(idm::get_unlocked<named_thread<ppu_thread>>(id));
-				}, idm::unlocked);
-			}
-
-			if (rlock)
-			{
-				rlock.unlock();
+				});
 			}
 
 			if (static_cast<u64>(info) != m_stop_ctr || Emu.IsStopped())

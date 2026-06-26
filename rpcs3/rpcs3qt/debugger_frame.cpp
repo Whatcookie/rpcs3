@@ -873,7 +873,7 @@ std::function<cpu_thread*()> debugger_frame::make_check_cpu(cpu_thread* cpu, boo
 {
 	constexpr cpu_thread* null_cpu = nullptr;
 
-	if (Emu.IsStopped(true))
+	if (Emu.IsStopped())
 	{
 		return []() { return null_cpu; };
 	}
@@ -922,7 +922,7 @@ std::function<cpu_thread*()> debugger_frame::make_check_cpu(cpu_thread* cpu, boo
 
 	return [cpu, type, shared = std::move(shared), emulation_id = Emu.GetEmulationIdentifier()]() mutable -> cpu_thread*
 	{
-		if (emulation_id != Emu.GetEmulationIdentifier() || Emu.IsStopped(true))
+		if (emulation_id != Emu.GetEmulationIdentifier() || Emu.IsStopped())
 		{
 			// Invalidate all data after Emu.Kill()
 			shared.reset();
@@ -1041,7 +1041,7 @@ void debugger_frame::UpdateUnitList()
 	const u64 emulation_id = static_cast<std::underlying_type_t<Emulator::stop_counter_t>>(Emu.GetEmulationIdentifier());
 	const u64 threads_created = cpu_thread::g_threads_created;
 	const u64 threads_deleted = cpu_thread::g_threads_deleted;
-	const system_state emu_state = Emu.GetStatus(false);
+	const system_state emu_state = Emu.GetStatus();
 
 	std::unique_lock<shared_mutex> lock{id_manager::g_mutex, std::defer_lock};
 
@@ -1077,11 +1077,6 @@ void debugger_frame::UpdateUnitList()
 	const auto on_select = [&](u32 id, cpu_thread& cpu)
 	{
 		std::function<cpu_thread*()> func_cpu = make_check_cpu(std::addressof(cpu), true);
-
-		if (cpu.state & cpu_flag::exit)
-		{
-			return;
-		}
 
 		// Space at the end is to pad a gap on the right
 		cpu_list.emplace_back(QString::fromStdString((id >> 24 == 0x55 ? "RSX[0x55555555]" : cpu.get_name()) + ' '), std::move(func_cpu));
