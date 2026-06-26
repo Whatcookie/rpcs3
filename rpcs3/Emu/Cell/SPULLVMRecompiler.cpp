@@ -6727,7 +6727,7 @@ public:
 	void CEQI(spu_opcode_t op)
 	{
 		// CEQHI following a comparison instruction (compare-equal negation)
-		if (!m_interp_magn && !op.si10 && match_vr<s32[4]>(op.ra, [&](auto c, auto MT)
+		if (false && !m_interp_magn && !op.si10 && match_vr<s32[4]>(op.ra, [&](auto c, auto MT)
 		{
 			using VT = typename decltype(MT)::type;
 			using VT_HALF = s16[8];
@@ -6756,7 +6756,7 @@ public:
 	void CEQHI(spu_opcode_t op)
 	{
 		// CEQHI following a comparison instruction (compare-equal negation)
-		if (!m_interp_magn && !op.si10 && match_vr<s16[8]>(op.ra, [&](auto c, auto MT)
+		if (false && !m_interp_magn && !op.si10 && match_vr<s16[8]>(op.ra, [&](auto c, auto MT)
 		{
 			using VT = typename decltype(MT)::type;
 			using VT_HALF = s8[16];
