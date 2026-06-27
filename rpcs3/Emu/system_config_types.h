@@ -377,4 +377,5 @@ enum class vsync_mode
 	off,
 	adaptive,
 	full,
+	relaxed,
 };

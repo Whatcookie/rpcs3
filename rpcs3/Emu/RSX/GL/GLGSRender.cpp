@@ -621,6 +621,7 @@ void GLGSRender::update_swap_interval()
 	case vsync_mode::off:
 		break;
 	case vsync_mode::adaptive:
+	case vsync_mode::relaxed:
 		swap_interval = -1;
 		break;
 	case vsync_mode::full:

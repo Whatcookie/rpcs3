@@ -1512,6 +1512,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case vsync_mode::off: return tr("Disabled", "VSync Mode");
 		case vsync_mode::adaptive: return tr("Adaptive", "VSync Mode");
 		case vsync_mode::full: return tr("Full", "VSync Mode");
+		case vsync_mode::relaxed: return tr("Relaxed", "VSync Mode");
 		}
 	default:
 		break;

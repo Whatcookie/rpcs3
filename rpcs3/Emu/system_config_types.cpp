@@ -762,6 +762,7 @@ void fmt_class_string<vsync_mode>::format(std::string& out, u64 arg)
 		case vsync_mode::off: return "Disabled";
 		case vsync_mode::adaptive: return "Adaptive";
 		case vsync_mode::full: return "Full";
+		case vsync_mode::relaxed: return "Relaxed";
 		}
 
 		return unknown;

@@ -242,6 +242,9 @@ namespace vk
 		case vsync_mode::adaptive:
 			preferred_modes = { VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_FIFO_RELAXED_KHR };
 			break;
+		case vsync_mode::relaxed:
+			preferred_modes = { VK_PRESENT_MODE_FIFO_RELAXED_KHR, VK_PRESENT_MODE_MAILBOX_KHR };
+			break;
 		case vsync_mode::full:
 		default:
 			// FIFO is guaranteed to be supported, no need to go through a preference chain
