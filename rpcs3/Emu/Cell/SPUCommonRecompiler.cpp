@@ -3143,7 +3143,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 							is_no_return = is_no_return || (op_next.rb >= 4 && op_next.rb < 10);
 						}
 
-						if (+iflags & +spu_iflag::use_rc)
+						if (type_next & spu_itype::_quadrop && +iflags & +spu_iflag::use_rc)
 						{
 							is_no_return = is_no_return || (op_next.ra >= 4 && op_next.rb < 10);
 						}
@@ -3461,7 +3461,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 							is_no_return = is_no_return || (op_next.rb >= 4 && op_next.rb < 10);
 						}
 
-						if (+iflags & +spu_iflag::use_rc)
+						if (type_next & spu_itype::_quadrop && +iflags & +spu_iflag::use_rc)
 						{
 							is_no_return = is_no_return || (op_next.rc >= 4 && op_next.rc < 10);
 						}
@@ -3982,8 +3982,6 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			continue;
 		}
 
-		bool removed = false;
-
 		for (auto it2 = it->second.begin(); it2 != it->second.end();)
 		{
 			// Drop targets out of range, OR pointing at a block that cleanup
@@ -3995,16 +3993,10 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point, s
 			if (*it2 < lsa || *it2 >= limit || !m_block_info[*it2 / 4])
 			{
 				it2 = it->second.erase(it2);
-				removed = true;
 				continue;
 			}
 
 			it2++;
-		}
-
-		if (removed)
-		{
-			it->second.emplace_back(SPU_LS_SIZE);
 		}
 
 		std::sort(it->second.begin(), it->second.end());
