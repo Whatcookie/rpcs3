@@ -8927,20 +8927,23 @@ public:
 
 		const auto a = get_vr(op.ra);
 
-		if (auto [ok, x, y] = match_expr(a, match<u32[4]>() + match<u32[4]>()); ok)
+		if (false)
 		{
-			if (auto [ok1, data] = get_const_vector(x.value, m_pos + 1); ok1 && data._u32[3] % 16 == 0)
+			if (auto [ok, x, y] = match_expr(a, match<u32[4]>() + match<u32[4]>()); ok)
 			{
-				value_t<u64> addr = eval(zext<u64>(extract(y, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
-				make_store_ls(addr, get_vr<u8[16]>(op.rt));
-				return;
-			}
+				if (auto [ok1, data] = get_const_vector(x.value, m_pos + 1); ok1 && data._u32[3] % 16 == 0)
+				{
+					value_t<u64> addr = eval(zext<u64>(extract(y, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
+					make_store_ls(addr, get_vr<u8[16]>(op.rt));
+					return;
+				}
 
-			if (auto [ok2, data] = get_const_vector(y.value, m_pos + 2); ok2 && data._u32[3] % 16 == 0)
-			{
-				value_t<u64> addr = eval(zext<u64>(extract(x, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
-				make_store_ls(addr, get_vr<u8[16]>(op.rt));
-				return;
+				if (auto [ok2, data] = get_const_vector(y.value, m_pos + 2); ok2 && data._u32[3] % 16 == 0)
+				{
+					value_t<u64> addr = eval(zext<u64>(extract(x, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
+					make_store_ls(addr, get_vr<u8[16]>(op.rt));
+					return;
+				}
 			}
 		}
 
@@ -8952,20 +8955,23 @@ public:
 	{
 		const auto a = get_vr(op.ra);
 
-		if (auto [ok, x1, y1] = match_expr(a, match<u32[4]>() + match<u32[4]>()); ok)
+		if (false)
 		{
-			if (auto [ok1, data] = get_const_vector(x1.value, m_pos + 1); ok1 && data._u32[3] % 16 == 0)
+			if (auto [ok, x1, y1] = match_expr(a, match<u32[4]>() + match<u32[4]>()); ok)
 			{
-				value_t<u64> addr = eval(zext<u64>(extract(y1, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
-				set_vr(op.rt, make_load_ls(addr));
-				return;
-			}
+				if (auto [ok1, data] = get_const_vector(x1.value, m_pos + 1); ok1 && data._u32[3] % 16 == 0)
+				{
+					value_t<u64> addr = eval(zext<u64>(extract(y1, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
+					set_vr(op.rt, make_load_ls(addr));
+					return;
+				}
 
-			if (auto [ok2, data] = get_const_vector(y1.value, m_pos + 2); ok2 && data._u32[3] % 16 == 0)
-			{
-				value_t<u64> addr = eval(zext<u64>(extract(x1, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
-				set_vr(op.rt, make_load_ls(addr));
-				return;
+				if (auto [ok2, data] = get_const_vector(y1.value, m_pos + 2); ok2 && data._u32[3] % 16 == 0)
+				{
+					value_t<u64> addr = eval(zext<u64>(extract(x1, 3) & 0x3fff0) + ((get_imm<u64>(op.si10) << 4) + splat<u64>(data._u32[3] & 0x3fff0)));
+					set_vr(op.rt, make_load_ls(addr));
+					return;
+				}
 			}
 		}
 
