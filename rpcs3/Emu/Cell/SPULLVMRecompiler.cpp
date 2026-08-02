@@ -1566,6 +1566,9 @@ public:
 		, cpu_translator(nullptr, false)
 		, m_interp_magn(interp_magn)
 	{
+#ifdef ARCH_ARM64
+		m_use_fma = false;
+#endif
 	}
 
 	virtual void init() override
