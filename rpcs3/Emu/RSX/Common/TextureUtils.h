@@ -2,7 +2,7 @@
 
 #include "io_buffer.h"
 #include "simple_array.hpp"
-#include "../color_utils.h"
+#include "../Utils/color_utils.hpp"
 #include "../RSXTexture.h"
 
 #include <vector>
@@ -422,4 +422,6 @@ namespace rsx
 	{
 		return is_border_clamped_texture(tex.wrap_s(), tex.wrap_t(), tex.wrap_r(), tex.dimension());
 	}
+
+	u32 get_ROP_output_shuffle_index(rsx::surface_color_format format);
 }
