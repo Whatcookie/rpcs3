@@ -10,6 +10,9 @@
 #include "BufferUtils_avx512.h"
 #elif defined(ARCH_ARM64)
 #include "BufferUtils_neon.h"
+#if defined(__GNUC__) || defined(__clang__)
+#include "BufferUtils_sve.h"
+#endif
 #endif
 
 #if !defined(_MSC_VER)
@@ -483,6 +486,16 @@ namespace
 		if (utils::has_avx512())
 		{
 			return s_avx512_upload_untouched_skip_restart_dispatch;
+		}
+#elif defined(ARCH_ARM64) && (defined(__GNUC__) || defined(__clang__))
+		if (utils::has_sve())
+		{
+			static const upload_untouched_skip_restart_dispatch sve =
+			{
+				upload_swapped_sve_skip_restart<u16>,
+				upload_swapped_sve_skip_restart<u32>,
+			};
+			return sve;
 		}
 #endif
 		return s_generic_upload_untouched_skip_restart_dispatch;
