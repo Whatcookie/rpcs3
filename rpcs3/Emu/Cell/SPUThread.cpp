@@ -299,6 +299,36 @@ extern bool cmp_rdata(const spu_rdata_t& _lhs, const spu_rdata_t& _rhs)
 #endif
 }
 
+#if defined(ARCH_ARM64)
+static FORCE_INLINE bool cmp_rdata_cached(const v128* rhs, v128 e0, v128 e1, v128 e2, v128 e3,
+	v128 e4, v128 e5, v128 e6, v128 e7)
+{
+	int16x8_t hits = vdupq_n_s16(0);
+	hits = cmp16_pair_accum_arm64(hits, e0, rhs[0], e1, rhs[1]);
+	hits = cmp16_pair_accum_arm64(hits, e2, rhs[2], e3, rhs[3]);
+	hits = cmp16_pair_accum_arm64(hits, e4, rhs[4], e5, rhs[5]);
+	hits = cmp16_pair_accum_arm64(hits, e6, rhs[6], e7, rhs[7]);
+	return vaddvq_s16(hits) == 32;
+}
+#endif
+
+template <typename Check>
+static FORCE_INLINE bool cmp_rdata_twice(const spu_rdata_t& expected, const spu_rdata_t& data, Check&& check)
+{
+#if defined(ARCH_ARM64)
+	const auto lhs = reinterpret_cast<const v128*>(expected);
+	const auto rhs = reinterpret_cast<const v128*>(data);
+	const v128 e0 = lhs[0], e1 = lhs[1], e2 = lhs[2], e3 = lhs[3];
+	const v128 e4 = lhs[4], e5 = lhs[5], e6 = lhs[6], e7 = lhs[7];
+
+	// Only the thread-owned reference is reused; both live observations remain.
+	return cmp_rdata_cached(rhs, e0, e1, e2, e3, e4, e5, e6, e7) && check() &&
+		cmp_rdata_cached(rhs, e0, e1, e2, e3, e4, e5, e6, e7);
+#else
+	return cmp_rdata(expected, data) && check() && cmp_rdata(expected, data);
+#endif
+}
+
 #if defined(ARCH_X64)
 static FORCE_INLINE void mov_rdata_avx(__m256i* dst, const __m256i* src)
 {
@@ -3427,7 +3457,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
 
 			// Writeback of unchanged data. Only check memory change
 			// For the comparison, load twice for atomicity
-			if (cmp_rdata(rdata, vm::_ref<spu_rdata_t>(addr)) && res == rtime && cmp_rdata(rdata, vm::_ref<spu_rdata_t>(addr)) && res.compare_and_swap_test(rtime, rtime + 128))
+			if (cmp_rdata_twice(rdata, vm::_ref<spu_rdata_t>(addr), [&] { return res == rtime; }) && res.compare_and_swap_test(rtime, rtime + 128))
 			{
 				raddr = 0; // Disable notification
 				return true;
@@ -4465,7 +4495,7 @@ bool spu_thread::process_mfc_cmd()
 						// Quick check if there were reservation changes
 						const u64 new_time = res;
 
-						if (new_time % 128 == 0 && cmp_rdata(rdata, data) && res == new_time && cmp_rdata(rdata, data))
+						if (new_time % 128 == 0 && cmp_rdata_twice(rdata, data, [&] { return res == new_time; }))
 						{
 							if (g_cfg.core.mfc_debug)
 							{
