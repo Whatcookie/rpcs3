@@ -142,14 +142,14 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 	bit_set<rsx::max_vertex_program_instructions> instructions_to_patch;
 	std::pair<u32, u32> instruction_range{ umax, 0 };
 	bool has_branch_instruction = false;
-	std::stack<u32> call_stack;
+	std::vector<u32> call_stack;
 
 	D3 d3{};
 	D2 d2{};
 	D1 d1{};
 	D0 d0{};
 
-	std::function<void(u32, bool)> walk_function = [&](u32 start, bool fast_exit)
+	auto walk_function = [&](auto&& self, u32 start, bool fast_exit) -> void
 	{
 		u32 current_instruction = start;
 		std::set<u32> conditional_targets;
@@ -265,7 +265,7 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 
 				if (function_call)
 				{
-					call_stack.push(current_instruction + 1);
+					call_stack.push_back(current_instruction + 1);
 					branch_to(jump_address);
 					continue;
 				}
@@ -292,8 +292,8 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 				}
 				else
 				{
-					branch_to(call_stack.top());
-					call_stack.pop();
+					branch_to(call_stack.back());
+					call_stack.pop_back();
 					continue;
 				}
 
@@ -333,7 +333,7 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 		{
 			if (!result.instruction_mask[target])
 			{
-				walk_function(target, true);
+				self(self, target, true);
 			}
 		}
 	};
@@ -346,7 +346,7 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 		dump.close();
 	}
 
-	walk_function(entry, false);
+	walk_function(walk_function, entry, false);
 
 	const u32 instruction_count = (instruction_range.second - instruction_range.first + 1);
 	result.ucode_length = instruction_count * 16;
@@ -636,8 +636,14 @@ fragment_program_utils::fragment_program_metadata fragment_program_utils::analys
 
 	while (true)
 	{
+#ifdef ARCH_X64
+		const __m128i inst = _mm_loadu_si128(reinterpret_cast<const __m128i*>(static_cast<const u8*>(instBuffer) + index * 16));
+		const u32 word0 = static_cast<u32>(_mm_cvtsi128_si32(inst));
+		const auto d0 = OPDEST::from_be32(word0);
+#else
 		const auto inst = v128::loadu(instBuffer, index);
 		const auto d0 = OPDEST::from_be32(inst._u32[0]);
+#endif
 		const auto opcode = static_cast<rsx::assembler::FP_opcode>(d0.opcode);
 
 		switch (opcode)
@@ -678,7 +684,14 @@ fragment_program_utils::fragment_program_metadata fragment_program_utils::analys
 			break;
 		}
 
+#ifdef ARCH_X64
+		const __m128i types = _mm_and_si128(inst, _mm_set1_epi32(0x300));
+		const __m128i matches = _mm_cmpeq_epi32(types, _mm_set1_epi32(0x200));
+		const bool has_constant = (_mm_movemask_ps(_mm_castsi128_ps(matches)) & 0xe) != 0;
+		if (has_constant)
+#else
 		if (is_any_src_constant(inst))
+#endif
 		{
 			// Instruction references constant, skip one slot occupied by data
 			index++;
@@ -687,7 +700,11 @@ fragment_program_utils::fragment_program_metadata fragment_program_utils::analys
 
 		index++;
 
+#ifdef ARCH_X64
+		if ((word0 >> 8) & 0x1)
+#else
 		if ((inst._u32[0] >> 8) & 0x1)
+#endif
 		{
 			break;
 		}
@@ -718,9 +735,167 @@ usz fragment_program_utils::get_fragment_program_ucode_hash(const RSXFragmentPro
 	return acc0 + acc1;
 }
 
+#ifdef _MSC_VER
+#define FRAGMENT_HASH_FUNC
+#else
+#define FRAGMENT_HASH_FUNC __attribute__((__target__("bmi2,avx512f,avx512bw,avx512dq,avx512cd,avx512vl,avx512bitalg,avx512ifma,avx512vbmi,avx512vbmi2,avx512vnni,avx512vpopcntdq")))
+#endif
+
+#ifdef ARCH_X64
+namespace
+{
+bool fragment_hash_has_bmi2()
+{
+	static const bool available = []
+	{
+#ifdef _MSC_VER
+		int regs[4];
+		__cpuidex(regs, 0, 0);
+		if (regs[0] < 7) return false;
+		__cpuidex(regs, 7, 0);
+		return (regs[1] & (1 << 8)) != 0;
+#else
+		u32 eax, ebx, ecx, edx;
+		__asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+		return (ebx & (1u << 8)) != 0;
+#endif
+	}();
+	return available;
+}
+
+// Bits 0..7 select the two qwords in each physical instruction slot.
+// Bit 8 carries a skipped inline-constant slot into the next four-slot block.
+constexpr auto fragment_hash_slot_masks = []
+{
+	std::array<u16, 32> result{};
+	for (u32 key = 0; key < result.size(); key++)
+	{
+		u32 skip = key >> 4;
+		u32 lanes = 0;
+		for (u32 slot = 0; slot < 4; slot++)
+		{
+			if (skip)
+			{
+				skip = 0;
+			}
+			else
+			{
+				lanes |= 3u << (slot * 2);
+				skip = (key >> slot) & 1;
+			}
+		}
+		result[key] = static_cast<u16>(lanes | (skip << 8));
+	}
+	return result;
+}();
+
+// Load by current flags only; select the incoming-carry outcome afterwards.
+constexpr auto fragment_hash_dual_masks = []
+{
+	std::array<u32, 16> result{};
+	for (u32 flags = 0; flags < 16; flags++)
+		for (u32 carry = 0; carry < 2; carry++)
+			result[flags] |= u32(fragment_hash_slot_masks[flags | (carry << 4)]) << (carry * 16);
+	return result;
+}();
+static_assert(sizeof(fragment_hash_dual_masks) == 64);
+
+FRAGMENT_HASH_FUNC u32 fragment_hash_constant_slots(__m512i inst)
+{
+	const auto types = _mm512_and_si512(inst, _mm512_set1_epi32(0x300));
+	const u32 m = _mm512_cmpeq_epi32_mask(types, _mm512_set1_epi32(0x200));
+	return _pext_u32(((m & 0x6666u) + 0x6666u) | m, 0x8888u);
+}
+
+constexpr auto fragment_hash_eight_masks = []
+{
+	std::array<u64, 256> result{};
+	for (u32 flags = 0; flags < 256; flags++)
+		for (u32 incoming = 0; incoming < 2; incoming++)
+		{
+			u32 skip = incoming, lanes = 0;
+			for (u32 slot = 0; slot < 8; slot++)
+			{
+				if (skip) skip = 0;
+				else
+				{
+					lanes |= 3u << (slot * 2);
+					skip = (flags >> slot) & 1;
+				}
+			}
+			result[flags] |= u64(lanes | (skip << 16)) << (incoming * 32);
+		}
+	return result;
+}();
+static_assert(sizeof(fragment_hash_eight_masks) == 2048);
+
+FRAGMENT_HASH_FUNC usz get_fragment_program_ucode_hash_512(const RSXFragmentProgram& program)
+{
+	const usz slots = program.ucode_length / 16;
+	if (slots < 4)
+	{
+		return fragment_program_utils::get_fragment_program_ucode_hash(program);
+	}
+
+	const auto data = static_cast<const u8*>(program.get_data());
+	__m512i acc = _mm512_setzero_si512();
+	__m512i acc_hi = _mm512_setzero_si512();
+	__m512i rotations = _mm512_setr_epi64(0, 1, 2, 3, 4, 5, 6, 7);
+	const __m512i rotation_step = _mm512_set1_epi64(8);
+	u32 carry = 0;
+	usz index = 0;
+	for (; index + 8 <= slots; index += 8)
+	{
+		const __m512i lo = _mm512_loadu_si512(data + index * 16);
+		const __m512i hi = _mm512_loadu_si512(data + index * 16 + 64);
+		const u32 flags = fragment_hash_constant_slots(lo) | (fragment_hash_constant_slots(hi) << 4);
+		const u32 state = static_cast<u32>(fragment_hash_eight_masks[flags] >> (carry * 32));
+		carry = state >> 16;
+		acc = _mm512_mask_add_epi64(acc, static_cast<__mmask8>(state), acc, _mm512_rorv_epi64(lo, rotations));
+		const __m512i hi_rotations = _mm512_add_epi64(rotations, rotation_step);
+		acc_hi = _mm512_mask_add_epi64(acc_hi, static_cast<__mmask8>(state >> 8), acc_hi, _mm512_rorv_epi64(hi, hi_rotations));
+		rotations = _mm512_add_epi64(hi_rotations, rotation_step);
+	}
+	for (; index + 4 <= slots; index += 4)
+	{
+		const __m512i inst = _mm512_loadu_si512(data + index * 16);
+		const u32 constants = fragment_hash_constant_slots(inst);
+		const u16 state = static_cast<u16>(fragment_hash_dual_masks[constants] >> (carry * 16));
+		carry = state >> 8;
+		const __m512i rotated = _mm512_rorv_epi64(inst, rotations);
+		acc = _mm512_mask_add_epi64(acc, static_cast<__mmask8>(state), acc, rotated);
+		// Rotations follow physical slots, including the skipped constant slots.
+		rotations = _mm512_add_epi64(rotations, rotation_step);
+	}
+
+	if (index < slots)
+	{
+		const u32 live = (1u << ((slots - index) * 2)) - 1;
+		const __m512i inst = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live), data + index * 16);
+		const u32 constants = fragment_hash_constant_slots(inst);
+		const u16 state = static_cast<u16>(fragment_hash_dual_masks[constants] >> (carry * 16));
+		const __m512i rotated = _mm512_rorv_epi64(inst, rotations);
+		acc = _mm512_mask_add_epi64(acc, static_cast<__mmask8>(state & live), acc, rotated);
+	}
+
+	return static_cast<usz>(_mm512_reduce_add_epi64(_mm512_add_epi64(acc, acc_hi)));
+}
+}
+#endif
+
 usz fragment_program_storage_hash::operator()(const RSXFragmentProgram& program) const
 {
-	const usz ucode_hash = fragment_program_utils::get_fragment_program_ucode_hash(program);
+	usz ucode_hash;
+#ifdef ARCH_X64
+	if (program.ucode_length >= 128 && utils::has_avx512_icl() && fragment_hash_has_bmi2())
+	{
+		ucode_hash = get_fragment_program_ucode_hash_512(program);
+	}
+	else
+#endif
+	{
+		ucode_hash = fragment_program_utils::get_fragment_program_ucode_hash(program);
+	}
 	const u32 state_params[] =
 	{
 		program.ctrl,
@@ -736,6 +911,134 @@ usz fragment_program_storage_hash::operator()(const RSXFragmentProgram& program)
 	return rpcs3::hash64(ucode_hash, metadata_hash);
 }
 
+#ifdef _MSC_VER
+#define COMPARE_FRAGMENT_FUNC
+#else
+#define COMPARE_FRAGMENT_FUNC __attribute__((__target__("bmi2,avx512f,avx512bw,avx512dq,avx512cd,avx512vl,avx512bitalg,avx512ifma,avx512vbmi,avx512vbmi2,avx512vnni,avx512vpopcntdq")))
+#endif
+#ifdef ARCH_X64
+namespace
+{
+bool fragment_comparison_has_bmi2()
+{
+	static const bool available = []
+	{
+#ifdef _MSC_VER
+		int regs[4];
+		__cpuidex(regs, 0, 0);
+		if (regs[0] < 7) return false;
+		__cpuidex(regs, 7, 0);
+		return (regs[1] & (1 << 8)) != 0;
+#else
+		u32 eax, ebx, ecx, edx;
+		__asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+		return (ebx & (1u << 8)) != 0;
+#endif
+	}();
+	return available;
+}
+
+constexpr auto fragment_compare_dual_masks = []
+{
+	std::array<u32, 16> result{};
+	for (u32 flags = 0; flags < 16; flags++)
+		for (u32 incoming = 0; incoming < 2; incoming++)
+			result[flags] |= u32(fragment_hash_slot_masks[flags | (incoming << 4)]) << (incoming * 16);
+	return result;
+}();
+static_assert(sizeof(fragment_compare_dual_masks) == 64);
+COMPARE_FRAGMENT_FUNC u32 fragment_compare_constant_slots(__m512i inst)
+{
+	const auto types = _mm512_and_si512(inst, _mm512_set1_epi32(0x300));
+	const u32 m = _mm512_cmpeq_epi32_mask(types, _mm512_set1_epi32(0x200));
+	return _pext_u32(((m & 0x6666u) + 0x6666u) | m, 0x8888u);
+}
+
+constexpr auto fragment_compare_eight_masks = []
+{
+	std::array<u64, 256> result{};
+	for (u32 flags = 0; flags < 256; flags++)
+		for (u32 incoming = 0; incoming < 2; incoming++)
+		{
+			u32 skip = incoming, lanes = 0;
+			for (u32 slot = 0; slot < 8; slot++)
+			{
+				if (skip) skip = 0;
+				else
+				{
+					lanes |= 3u << (slot * 2);
+					skip = (flags >> slot) & 1;
+				}
+			}
+			result[flags] |= u64(lanes | (skip << 16)) << (incoming * 32);
+		}
+	return result;
+}();
+static_assert(sizeof(fragment_compare_eight_masks) == 2048);
+
+COMPARE_FRAGMENT_FUNC bool compare_fragment_program_ucode_512(const void* lhs, const void* rhs, usz slots)
+{
+	const auto data1 = static_cast<const u8*>(lhs);
+	const auto data2 = static_cast<const u8*>(rhs);
+	u32 carry = 0;
+	usz index = 0;
+	// Preserve a bounded physical four-slot prefix after the unchanged probe.
+	if (slots >= 4)
+	{
+		const __m512i inst1 = _mm512_loadu_si512(data1);
+		const __m512i inst2 = _mm512_loadu_si512(data2);
+		const u32 flags = fragment_compare_constant_slots(inst1);
+		const u16 state = static_cast<u16>(fragment_compare_dual_masks[flags]);
+		if (_mm512_mask_cmpneq_epi64_mask(static_cast<__mmask8>(state), inst1, inst2))
+			return false;
+		carry = state >> 8;
+		index = 4;
+	}
+	// Eight-slot groups start at physical slots 4, 12, 20, ...
+	for (; index + 8 <= slots; index += 8)
+	{
+		const __m512i lo1 = _mm512_loadu_si512(data1 + index * 16);
+		const __m512i lo2 = _mm512_loadu_si512(data2 + index * 16);
+		const __m512i hi1 = _mm512_loadu_si512(data1 + index * 16 + 64);
+		const __m512i hi2 = _mm512_loadu_si512(data2 + index * 16 + 64);
+		const u32 flags = fragment_compare_constant_slots(lo1) | (fragment_compare_constant_slots(hi1) << 4);
+		const u32 state = static_cast<u32>(fragment_compare_eight_masks[flags] >> (carry * 32));
+		if (_mm512_mask_cmpneq_epi64_mask(static_cast<__mmask8>(state), lo1, lo2) ||
+			_mm512_mask_cmpneq_epi64_mask(static_cast<__mmask8>(state >> 8), hi1, hi2))
+			return false;
+		carry = state >> 16;
+	}
+	for (; index + 4 <= slots; index += 4)
+	{
+		const __m512i inst1 = _mm512_loadu_si512(data1 + index * 16);
+		const __m512i inst2 = _mm512_loadu_si512(data2 + index * 16);
+		const u32 constants = fragment_compare_constant_slots(inst1);
+		const u16 state = static_cast<u16>(fragment_compare_dual_masks[constants] >> (carry * 16));
+		if (_mm512_mask_cmpneq_epi64_mask(static_cast<__mmask8>(state), inst1, inst2))
+		{
+			return false;
+		}
+		carry = state >> 8;
+	}
+
+	if (index < slots)
+	{
+		const u32 live = (1u << ((slots - index) * 2)) - 1;
+		const __m512i inst1 = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live), data1 + index * 16);
+		const __m512i inst2 = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live), data2 + index * 16);
+		const u32 constants = fragment_compare_constant_slots(inst1);
+		const u16 state = static_cast<u16>(fragment_compare_dual_masks[constants] >> (carry * 16));
+		if (_mm512_mask_cmpneq_epi64_mask(static_cast<__mmask8>(state & live), inst1, inst2))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+}
+#endif
+
 bool fragment_program_compare::operator()(const RSXFragmentProgram& binary1, const RSXFragmentProgram& binary2) const
 {
 	if (!compare_properties(binary1, binary2))
@@ -745,6 +1048,22 @@ bool fragment_program_compare::operator()(const RSXFragmentProgram& binary1, con
 
 	const void* instBuffer1 = binary1.get_data();
 	const void* instBuffer2 = binary2.get_data();
+#ifdef ARCH_X64
+	if (binary1.ucode_length >= 128 && utils::has_avx512_icl())
+	{
+		// Preserve a cheap rejection when the first instruction differs.
+		const auto inst1 = v128::loadu(instBuffer1, 0);
+		const auto inst2 = v128::loadu(instBuffer2, 0);
+		if (inst1._u ^ inst2._u)
+		{
+			return false;
+		}
+		if (fragment_comparison_has_bmi2())
+		{
+			return compare_fragment_program_ucode_512(instBuffer1, instBuffer2, binary1.ucode_length / 16);
+		}
+	}
+#endif
 	for (usz instIndex = 0; instIndex < (binary1.ucode_length / 16); instIndex++)
 	{
 		const auto inst1 = v128::loadu(instBuffer1, instIndex);
