@@ -491,33 +491,34 @@ namespace
 		{
 			return s_avx512_upload_untouched_skip_restart_dispatch;
 		}
+
 		if (s_use_avx2)
 		{
-			static const upload_untouched_skip_restart_dispatch avx2 =
+			static const upload_untouched_skip_restart_dispatch s_avx2 =
 			{
 				upload_swapped_avx2_skip_restart<u16>,
 				upload_swapped_avx2_skip_restart<u32>,
 			};
-			return avx2;
+			return s_avx2;
 		}
 #elif defined(ARCH_ARM64) && (defined(__GNUC__) || defined(__clang__))
 		if (utils::has_sve())
 		{
-			static const upload_untouched_skip_restart_dispatch sve =
+			static const upload_untouched_skip_restart_dispatch s_sve =
 			{
 				upload_swapped_sve_skip_restart<u16>,
 				upload_swapped_sve_skip_restart<u32>,
 			};
-			return sve;
+			return s_sve;
 		}
 #endif
 #if defined(ARCH_ARM64)
-		static const upload_untouched_skip_restart_dispatch neon =
+		static const upload_untouched_skip_restart_dispatch s_neon =
 		{
 			upload_swapped_neon_skip_restart<u16>,
 			upload_swapped_neon_skip_restart<u32>,
 		};
-		return neon;
+		return s_neon;
 #else
 		return s_generic_upload_untouched_skip_restart_dispatch;
 #endif

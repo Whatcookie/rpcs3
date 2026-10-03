@@ -18,6 +18,7 @@ namespace
 		auto min = svdup_n_u32(static_cast<T>(-1));
 		auto max = svdup_n_u32(0);
 		const auto all = svptrue_b32();
+
 		for (u64 i = 0; i < count; i += svcntw())
 		{
 			const auto active = svwhilelt_b32(i, u64{count});
@@ -49,8 +50,9 @@ namespace
 			}
 			written += processed;
 		}
+
 		return {static_cast<T>(svminv_u32(all, min)), static_cast<T>(svmaxv_u32(all, max)), written};
 	}
-}
+} // namespace
 
 #undef BUFFERUTILS_SVE

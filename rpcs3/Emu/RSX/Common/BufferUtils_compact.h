@@ -6,10 +6,12 @@ namespace
 	constexpr auto make_compress_table()
 	{
 		std::array<std::array<u8, 16>, 1u << Lanes> table{};
+
 		for (usz mask = 0; mask < table.size(); ++mask)
 		{
 			table[mask].fill(0xff);
 			usz out = 0;
+
 			for (usz lane = 0; lane < Lanes; ++lane)
 			{
 				if (mask & (1u << lane))
@@ -21,6 +23,7 @@ namespace
 				}
 			}
 		}
+
 		return table;
 	}
 
@@ -32,12 +35,16 @@ namespace
 	std::tuple<T, T, u32> upload_swapped_neon_skip_restart(std::span<to_be_t<const T>> src, std::span<T> dst, T restart_index)
 	{
 		const u32 count = ::size32(src);
-		u32 i = 0, written = 0;
-		T min_index = static_cast<T>(-1), max_index = 0;
+		u32 i = 0;
+		u32 written = 0;
+		T min_index = static_cast<T>(-1);
+		T max_index = 0;
 		if constexpr (sizeof(T) == 2)
 		{
-			auto min = vdupq_n_u16(-1), max = vdupq_n_u16(0);
+			auto min = vdupq_n_u16(-1);
+			auto max = vdupq_n_u16(0);
 			const u16 weights[] = {1, 2, 4, 8, 16, 32, 64, 128};
+
 			for (; count - i >= 8; i += 8)
 			{
 				const auto value = vreinterpretq_u16_u8(vrev16q_u8(vld1q_u8(reinterpret_cast<const u8*>(src.data() + i))));
@@ -50,13 +57,16 @@ namespace
 				vst1q_u8(reinterpret_cast<u8*>(dst.data() + written), packed);
 				written += std::popcount(mask);
 			}
+
 			min_index = vminvq_u16(min);
 			max_index = vmaxvq_u16(max);
 		}
 		else
 		{
-			auto min = vdupq_n_u32(-1), max = vdupq_n_u32(0);
+			auto min = vdupq_n_u32(-1);
+			auto max = vdupq_n_u32(0);
 			const u32 weights[] = {1, 2, 4, 8};
+
 			for (; count - i >= 4; i += 4)
 			{
 				const auto value = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(reinterpret_cast<const u8*>(src.data() + i))));
@@ -68,9 +78,11 @@ namespace
 				vst1q_u8(reinterpret_cast<u8*>(dst.data() + written), packed);
 				written += std::popcount(mask);
 			}
+
 			min_index = vminvq_u32(min);
 			max_index = vmaxvq_u32(max);
 		}
+
 		for (; i < count; ++i)
 		{
 			const T value = src[i];
@@ -81,20 +93,27 @@ namespace
 				dst[written++] = value;
 			}
 		}
+
 		return {min_index, max_index, written};
 	}
 #elif defined(ARCH_X64)
 	alignas(64) constexpr auto s_compress_u32_avx2 = []
 	{
 		std::array<std::array<u32, 8>, 256> table{};
+
 		for (u32 mask = 0; mask < 256; ++mask)
 		{
 			u32 out = 0;
+
 			for (u32 lane = 0; lane < 8; ++lane)
 			{
-				if (mask & (1u << lane)) table[mask][out++] = lane;
+				if (mask & (1u << lane))
+				{
+					table[mask][out++] = lane;
+				}
 			}
 		}
+
 		return table;
 	}();
 
@@ -102,11 +121,14 @@ namespace
 	AVX2_FUNC std::tuple<T, T, u32> upload_swapped_avx2_skip_restart(std::span<to_be_t<const T>> src, std::span<T> dst, T restart_index)
 	{
 		const u32 count = ::size32(src);
-		u32 i = 0, written = 0;
-		auto min = _mm256_set1_epi32(-1), max = _mm256_setzero_si256();
+		u32 i = 0;
+		u32 written = 0;
+		auto min = _mm256_set1_epi32(-1);
+		auto max = _mm256_setzero_si256();
 		const auto swap = _mm256_broadcastsi128_si256(sizeof(T) == 2 ? s_bswap_u16_mask : s_bswap_u32_mask);
 		const auto restart = sizeof(T) == 2 ? _mm256_set1_epi16(restart_index) : _mm256_set1_epi32(restart_index);
 		constexpr u32 lanes = 32 / sizeof(T);
+
 		for (; count - i >= lanes; i += lanes)
 		{
 			const auto raw = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src.data() + i));
@@ -119,7 +141,8 @@ namespace
 				const auto lo_mask = _mm256_castsi256_si128(removed);
 				const auto hi_mask = _mm256_extracti128_si256(removed, 1);
 				const u32 mask = static_cast<u32>(~_mm_movemask_epi8(_mm_packs_epi16(lo_mask, hi_mask))) & 0xffff;
-				const u32 lo = mask & 255, hi = mask >> 8;
+				const u32 lo = mask & 255;
+				const u32 hi = mask >> 8;
 				const auto a = _mm_shuffle_epi8(_mm256_castsi256_si128(value), _mm_loadu_si128(reinterpret_cast<const __m128i*>(s_compress_u16[lo].data())));
 				const auto b = _mm_shuffle_epi8(_mm256_extracti128_si256(value, 1), _mm_loadu_si128(reinterpret_cast<const __m128i*>(s_compress_u16[hi].data())));
 				_mm_storeu_si128(reinterpret_cast<__m128i*>(dst.data() + written), a);
@@ -139,11 +162,14 @@ namespace
 				written += std::popcount(mask);
 			}
 		}
-		alignas(32) T min_lanes[lanes], max_lanes[lanes];
+
+		alignas(32) T min_lanes[lanes];
+		alignas(32) T max_lanes[lanes];
 		_mm256_store_si256(reinterpret_cast<__m256i*>(min_lanes), min);
 		_mm256_store_si256(reinterpret_cast<__m256i*>(max_lanes), max);
 		T min_index = *std::min_element(std::begin(min_lanes), std::end(min_lanes));
 		T max_index = *std::max_element(std::begin(max_lanes), std::end(max_lanes));
+
 		for (; i < count; ++i)
 		{
 			const T value = src[i];
@@ -154,7 +180,8 @@ namespace
 				dst[written++] = value;
 			}
 		}
+
 		return {min_index, max_index, written};
 	}
 #endif
-}
+} // namespace
