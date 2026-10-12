@@ -217,15 +217,18 @@ constexpr auto fragment_hash_eight_masks = []
 }();
 static_assert(sizeof(fragment_hash_eight_masks) == 2048);
 
-AVX512_ICL_FUNC u32 fragment_hash_constant_slots(__m512i inst)
+AVX512_ICL_FUNC u32 fragment_constant_slots(__m512i lo, __m512i hi)
 {
-	// Isolate the two-bit type field; type 2 denotes an inline constant.
-	const auto types = _mm512_and_si512(inst, _mm512_set1_epi32(0x300));
-	// One bit per 32-bit word; bits 1..3 of each nibble are sources, excluding bit 0.
-	const u32 m = _mm512_cmpeq_epi32_mask(types, _mm512_set1_epi32(0x200));
-	// Adding 0b0110 to selected bits 1/2 carries into bit 3 if either is set, without crossing nibbles.
-	// OR includes the third source; PEXT gathers bits 3, 7, 11 and 15 into four instruction flags.
-	return _pext_u32(((m & 0x6666u) + 0x6666u) | m, 0x8888u);
+	// Isolate the type fields; type 2 denotes an inline constant.
+	const auto lo_types = _mm512_and_si512(lo, _mm512_set1_epi32(0x300));
+	const auto hi_types = _mm512_and_si512(hi, _mm512_set1_epi32(0x300));
+	const u32 lo_matches = _mm512_cmpeq_epi32_mask(lo_types, _mm512_set1_epi32(0x200));
+	const u32 hi_matches = _mm512_cmpeq_epi32_mask(hi_types, _mm512_set1_epi32(0x200));
+	// Pack both per-word masks; bits 1..3 in each nibble are sources, excluding bit 0.
+	const u32 matches = lo_matches | (hi_matches << 16);
+	// Adding 0b0110 to bits 1/2 carries into bit 3 without crossing nibbles.
+	// OR includes the third source; one PEXT gathers eight instruction flags.
+	return _pext_u32(((matches & 0x66666666u) + 0x66666666u) | matches, 0x88888888u);
 }
 
 constexpr auto fragment_compare_dual_masks = []
@@ -301,7 +304,7 @@ static AVX512_ICL_FUNC NEVER_INLINE usz get_fragment_program_ucode_hash_512(cons
 		const auto ptr = data + index * 16;
 		const __m512i lo = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live), ptr);
 		const __m512i hi = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live >> 8), ptr + high_offset);
-		const u32 flags = fragment_hash_constant_slots(lo) | (fragment_hash_constant_slots(hi) << 4);
+		const u32 flags = fragment_constant_slots(lo, hi);
 		const u32 state = static_cast<u32>(fragment_hash_eight_masks[flags] >> (carry * 32));
 		const u32 mask = state & live;
 		carry = state >> 16;
@@ -347,7 +350,7 @@ static AVX512_ICL_FUNC NEVER_INLINE bool compare_fragment_program_ucode_512(cons
 		const __m512i lo2 = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live), ptr2);
 		const __m512i hi1 = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live >> 8), ptr1 + high_offset);
 		const __m512i hi2 = _mm512_maskz_loadu_epi64(static_cast<__mmask8>(live >> 8), ptr2 + high_offset);
-		const u32 flags = fragment_compare_constant_slots(lo1) | (fragment_compare_constant_slots(hi1) << 4);
+		const u32 flags = fragment_constant_slots(lo1, hi1);
 		const u32 state = static_cast<u32>(fragment_compare_eight_masks[flags] >> (carry * 32));
 		const u32 mask = state & live;
 		if (_mm512_mask_cmpneq_epi64_mask(static_cast<__mmask8>(mask), lo1, lo2) ||
