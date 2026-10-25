@@ -4693,6 +4693,9 @@ bool spu_thread::process_mfc_cmd()
 
 			mov_rdata(rdata, data);
 
+			// Complete snapshot reads before validating the reservation timestamp.
+			utils::weak_read_barrier();
+
 			if (u64 time0 = vm::reservation_acquire(addr); ntime != time0)
 			{
 				// Reservation data has been modified recently

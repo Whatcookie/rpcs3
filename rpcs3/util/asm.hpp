@@ -17,8 +17,79 @@
 #endif
 #endif
 
+#if defined(ARCH_ARM64) && defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 namespace utils
 {
+	// Weak-memory ordering for ordinary cacheable memory: read orders Load->Load,
+	// write orders Store->Store, and rw also orders Load->Store. ARM may be stronger.
+	// No portable Store->Load, MMIO, non-temporal, or C++ seq_cst guarantee.
+	FORCE_INLINE void weak_read_barrier()
+	{
+#if defined(ARCH_ARM64)
+#ifdef _MSC_VER
+		_ReadWriteBarrier();
+		__dmb(_ARM64_BARRIER_ISHLD);
+		_ReadWriteBarrier();
+#else
+		__asm__ volatile("dmb ishld" ::: "memory");
+#endif
+#elif defined(ARCH_X64)
+#ifdef _MSC_VER
+		_ReadWriteBarrier();
+#else
+		__asm__ volatile("" ::: "memory");
+#endif
+#else
+#error "Missing utils::weak_read_barrier() implementation"
+#endif
+	}
+
+	FORCE_INLINE void weak_write_barrier()
+	{
+#if defined(ARCH_ARM64)
+#ifdef _MSC_VER
+		_ReadWriteBarrier();
+		__dmb(_ARM64_BARRIER_ISHST);
+		_ReadWriteBarrier();
+#else
+		__asm__ volatile("dmb ishst" ::: "memory");
+#endif
+#elif defined(ARCH_X64)
+#ifdef _MSC_VER
+		_ReadWriteBarrier();
+#else
+		__asm__ volatile("" ::: "memory");
+#endif
+#else
+#error "Missing utils::weak_write_barrier() implementation"
+#endif
+	}
+
+	FORCE_INLINE void weak_rw_barrier()
+	{
+#if defined(ARCH_ARM64)
+#ifdef _MSC_VER
+		_ReadWriteBarrier();
+		__dmb(_ARM64_BARRIER_ISH);
+		_ReadWriteBarrier();
+#else
+		__asm__ volatile("dmb ish" ::: "memory");
+#endif
+#elif defined(ARCH_X64)
+#ifdef _MSC_VER
+		_ReadWriteBarrier();
+#else
+		__asm__ volatile("" ::: "memory");
+#endif
+#else
+#error "Missing utils::weak_rw_barrier() implementation"
+#endif
+	}
+
+
 	// Try to prefetch to Level 2 cache since it's not split to data/code on most processors
 	template <typename T>
 	constexpr void prefetch_exec(T func)
