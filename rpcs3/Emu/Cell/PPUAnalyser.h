@@ -128,6 +128,7 @@ struct ppu_module : public Type
 	ppu_module& operator=(ppu_module&&) noexcept = default;
 
 	uchar sha1[20]{}; // Hash
+	std::array<u8, 20> patch_sha1{};
 	std::string name{}; // Filename
 	std::string path{}; // Filepath
 	s64 offset = 0; // Offset of file
@@ -186,6 +187,7 @@ struct ppu_module : public Type
 	void copy_part(const ppu_module& info)
 	{
 		std::memcpy(sha1, info.sha1, sizeof(sha1));
+		patch_sha1 = info.patch_sha1;
 		name = info.name;
 		path = info.path;
 		segs = info.segs;

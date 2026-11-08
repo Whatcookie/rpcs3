@@ -5614,6 +5614,12 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 			u8 output[20];
 			sha1_starts(&ctx);
 
+			// Include the empty digest too, so historically poisoned PRX keys cannot be reused.
+			if (reloc)
+			{
+				sha1_update(&ctx, info.patch_sha1.data(), info.patch_sha1.size());
+			}
+
 			int has_dcbz = !!g_cfg.core.accurate_cache_line_stores;
 
 			for (const auto& func : part.get_funcs())

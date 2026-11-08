@@ -1993,6 +1993,17 @@ shared_ptr<lv2_prx> ppu_load_prx(const ppu_prx_object& elf, bool virtual_load, c
 		}
 	}
 
+	// Unpatched loads keep relocation-independent keys; restored memory already contains patches.
+	sha1_starts(&sha);
+	if (!applied.empty() || ar)
+	{
+		for (const auto& seg : prx->segs)
+		{
+			sha1_update(&sha, static_cast<const u8*>(seg.ptr), seg.size);
+		}
+	}
+	sha1_finish(&sha, prx->patch_sha1.data());
+
 	// Disabled for PRX for now (problematic and does not seem to have any benefit)
 	end = 0;
 
